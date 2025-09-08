@@ -48,8 +48,8 @@ impl TryFrom<&str> for Command {
 
             "pwd" => if input_slice.len()<2 {return Ok(Self::Pwd)} else {Err(anyhow!("too many arguments/options"))},
 
-            "cd" => if input_slice.len() != 2 {
-                return Err(anyhow!("cd requires an argument"));
+            "cd" => if input_slice.len() > 2 {
+                return Err(anyhow!("cd requires one arguments"));
             } else {
                 return Ok(Self::Cd(input_slice[1..].join(" ")));
             }
