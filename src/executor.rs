@@ -1,19 +1,19 @@
-use crate::command::{ Command, Rm };
-use crate::errors::{ CrateResult };
-use anyhow::{ anyhow, Ok };
-use tokio::fs::{ self, remove_file, read_to_string };
-use std::{ result };
+use crate::command::{Command, Rm};
+use crate::errors::CrateResult;
+use anyhow::{anyhow, Ok};
+use std::{env, result};
+use tokio::fs::{self, read_to_string, remove_file};
 
 pub struct Executor {
     pub current_dir: String,
-    pub history: Vec<String>,
+    pub _history: Vec<String>,
 }
 
 impl Executor {
     pub fn new() -> Self {
         Self {
             current_dir: pwd(),
-            history: vec![],
+            _history: vec![],
         }
     }
 
@@ -21,7 +21,14 @@ impl Executor {
         match command {
             Command::Echo(v) => self.echo(v),
             Command::Cd(v) => self.cd(v),
+<<<<<<< HEAD
             Command::Ls(ls) => self.ls(ls).await,
+=======
+            Command::Ls(ls) => Ok(format!(
+                "command: Ls, content: {:?}, flag: {}\n",
+                ls.dirs, ls.flag
+            )),
+>>>>>>> a4d6f73debfc0d157005214914f706cd71ee2cc3
             Command::Pwd => self.pwd(),
             Command::Cat(v) => self.cat(v).await,
             Command::Cp(v) => Ok(format!("command: Cp, content: {:?}\n", v)),
@@ -38,11 +45,22 @@ impl Executor {
         Ok(String::new())
     }
     fn echo(&self, input: &String) -> CrateResult<String> {
-        Ok(format!("{}\n", input.to_string().replace("\"", "").replace("\'", "")))
+        Ok(format!(
+            "{}\n",
+            input.to_string().replace("\"", "").replace("\'", "")
+        ))
     }
 
-    fn cd(&mut self, input: &String) -> CrateResult<String> {
-        if let std::result::Result::Ok(()) = std::env::set_current_dir(input.to_string()) {
+    fn cd(&mut self, input:  &String) -> CrateResult<String> {
+        let mut input = input.clone();
+        if input.len() == 0 {
+            if let Some(home_path) = env::home_dir() {
+                input =  home_path.to_str().unwrap().to_string();
+            } else {
+                return Err(anyhow!("something wrong, please fix it!..\n"))
+            }
+        } 
+        if let std::result::Result::Ok(()) = std::env::set_current_dir(&input) {
             self.current_dir = pwd();
             Ok(String::new())
         } else {
@@ -61,7 +79,10 @@ impl Executor {
             match fs::create_dir(&full_path).await {
                 result::Result::Ok(()) => (),
                 result::Result::Err(err) => {
-                    res = Err(anyhow!(format!("cannot create directory '{}': {}", path, err)));
+                    res = Err(anyhow!(format!(
+                        "cannot create directory '{}': {}",
+                        path, err
+                    )));
                 }
             }
         }
@@ -85,14 +106,12 @@ impl Executor {
 
             match action {
                 result::Result::Ok(()) => (),
-                result::Result::Err(err) => {
-                    match remove_file(&path).await {
-                        result::Result::Ok(()) => (),
-                        result::Result::Err(_) => {
-                            res = Err(anyhow!("cannot remove '{}': {}", path, err));
-                        }
+                result::Result::Err(err) => match remove_file(&path).await {
+                    result::Result::Ok(()) => (),
+                    result::Result::Err(_) => {
+                        res = Err(anyhow!("cannot remove '{}': {}", path, err));
                     }
-                }
+                },
             }
         }
         return res;
@@ -108,7 +127,7 @@ impl Executor {
             };
             match read_to_string(full_path).await {
                 result::Result::Ok(content) => res.push_str(&(content)),
-                result::Result::Err(err) => res=format!("{}Error: {}: {}\n", res,path, err)
+                result::Result::Err(err) => res = format!("{}Error: {}: {}\n", res, path, err),
             }
         }
         return Ok(res);
