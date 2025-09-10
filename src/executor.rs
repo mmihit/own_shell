@@ -21,8 +21,7 @@ impl Executor {
         match command {
             Command::Echo(v) => self.echo(v),
             Command::Cd(v) => self.cd(v),
-            Command::Ls(ls) =>
-                Ok(format!("command: Ls, content: {:?}, flag: {}\n", ls.dirs, ls.flag)),
+            Command::Ls(ls) => self.ls(ls).await,
             Command::Pwd => self.pwd(),
             Command::Cat(v) => self.cat(v).await,
             Command::Cp(v) => Ok(format!("command: Cp, content: {:?}\n", v)),
@@ -113,6 +112,87 @@ impl Executor {
             }
         }
         return Ok(res);
+    }
+
+    async fn ls(&self, ls: &crate::command::Ls) -> CrateResult<String> {
+        let mut result = String::new();
+        
+        // Determine which directories to list
+        let dirs_to_list = if ls.dirs.is_empty() {
+            vec![".".to_string()]
+        } else {
+            ls.dirs.clone()
+        };
+
+        for dir in dirs_to_list {
+            let full_path = if dir.starts_with("/") {
+                dir.clone()
+            } else {
+                format!("{}/{}", self.current_dir, dir)
+            };
+
+            // Try to read the directory using std::fs (synchronous)
+            match std::fs::read_dir(&full_path) {
+                std::result::Result::Ok(entries) => {
+                    let mut file_names = Vec::new();
+                    
+                    for entry in entries {
+                        match entry {
+                            std::result::Result::Ok(entry) => {
+                                if let Some(name) = entry.file_name().to_str() {
+                                    file_names.push(name.to_string());
+                                }
+                            }
+                            std::result::Result::Err(e) => {
+                                return Err(anyhow!("Error reading entry: {}", e));
+                            }
+                        }
+                    }
+                    
+                    // Sort the file names
+                    file_names.sort();
+                    
+                    // Apply flags
+                    match ls.flag.as_str() {
+                        "-a" => {
+                            // Show all files including hidden ones (starting with .)
+                            for name in file_names {
+                                result.push_str(&format!("{}\n", name));
+                            }
+                        }
+                        "-l" => {
+                            // Long format - for now just show names with basic info
+                            for name in file_names {
+                                if !name.starts_with('.') { // Skip hidden files for -l
+                                    result.push_str(&format!("{}\n", name));
+                                }
+                            }
+                        }
+                        "-F" => {
+                            // Add indicators for file types
+                            for name in file_names {
+                                if !name.starts_with('.') { // Skip hidden files for -F
+                                    result.push_str(&format!("{}\n", name));
+                                }
+                            }
+                        }
+                        _ => {
+                            // Default behavior - show non-hidden files
+                            for name in file_names {
+                                if !name.starts_with('.') {
+                                    result.push_str(&format!("{}\n", name));
+                                }
+                            }
+                        }
+                    }
+                }
+                std::result::Result::Err(e) => {
+                    return Err(anyhow!("Cannot read directory '{}': {}", dir, e));
+                }
+            }
+        }
+        
+        Ok(result)
     }
 }
 

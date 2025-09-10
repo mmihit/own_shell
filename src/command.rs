@@ -70,7 +70,7 @@ impl TryFrom<&str> for Command {
                         ),
                     v if v.chars().nth(0) == Some('-') => {
                         return Err(
-                            anyhow!("invalid option <{v}>, expected one of this args: -l, -a, -F")
+                            anyhow!("invalid option gf <{v}>, expected one of this args: -l, -a, -F tezzzz")
                         );
                     }
                     _ =>
