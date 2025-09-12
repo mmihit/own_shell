@@ -147,8 +147,8 @@ impl TryFrom<&str> for Command {
 
             }
 
-            "mv" => if input_slice.len() < 3 {
-                return Err(anyhow!("rm requires at least one argument"));
+            "mv" => if input_slice.len() != 3 {
+                return Err(anyhow!("mv requires exactly two arguments: source and destination"));
             } else {
                 return Ok(
                     Self::Mv(
