@@ -1,9 +1,9 @@
 use crate::command::{Command, Rm};
 use crate::errors::CrateResult;
 use anyhow::{anyhow, Ok};
-use std::{env, result, path::Path};
-use tokio::fs::{self, read_to_string, remove_file, create_dir_all, remove_dir_all};
- use std::result::Result::Ok as ResultOk;
+use std::result::Result::Ok as ResultOk;
+use std::{env, path::Path, result};
+use tokio::fs::{self, create_dir_all, read_to_string, remove_dir_all, remove_file};
 
 pub struct Executor {
     pub current_dir: String,
@@ -27,7 +27,7 @@ impl Executor {
 
             Command::Pwd => self.pwd(),
             Command::Cat(v) => self.cat(v).await,
-            Command::Cp(v) => Ok(format!("command: Cp, content: {:?}\n", v)),
+            Command::Cp(v) => self.cp(v).await,
             Command::Rm(rm) => self.rm(rm).await,
             Command::Mv(v) => self.mv(v).await,
             Command::Mkdir(v) => self.mkdir(v).await,
@@ -47,15 +47,15 @@ impl Executor {
         ))
     }
 
-    fn cd(&mut self, input:  &String) -> CrateResult<String> {
+    fn cd(&mut self, input: &String) -> CrateResult<String> {
         let mut input = input.clone();
         if input.len() == 0 {
             if let Some(home_path) = env::home_dir() {
-                input =  home_path.to_str().unwrap().to_string();
+                input = home_path.to_str().unwrap().to_string();
             } else {
-                return Err(anyhow!("something wrong, please fix it!..\n"))
+                return Err(anyhow!("something wrong, please fix it!..\n"));
             }
-        } 
+        }
         if let std::result::Result::Ok(()) = std::env::set_current_dir(&input) {
             self.current_dir = pwd();
             Ok(String::new())
@@ -129,9 +129,78 @@ impl Executor {
         return Ok(res);
     }
 
+    async fn cp(&self, input: &Vec<String>) -> CrateResult<String> {
+        let sources: Vec<String> = input[..input.len() - 1].to_vec();
+        let last_index = &input[input.len() - 1];
+        let destination = if last_index.starts_with("/") {
+            last_index.clone()
+        } else {
+            format!("{}/{}", self.current_dir, last_index)
+        };
+
+        println!("source: {:?}\ndestination:{}", sources, destination);
+
+        let metadata_result = tokio::fs::metadata(&destination).await;
+        let mut is_destination_not_exist: bool = false;
+        let mut is_destination_file = false;
+        match metadata_result {
+            Err(error) => {
+                if sources.len() > 1 {
+                    return Err(anyhow!(error));
+                } else {
+                    is_destination_not_exist = true;
+                }
+            }
+            result::Result::Ok(metadata) => {
+                if metadata.is_file() {
+                    is_destination_file = true
+                }
+                if sources.len() > 1 && is_destination_file {
+                    return Err(anyhow!("The destination should be a directory"));
+                }
+            }
+        }
+
+        // Get metadata again for later use
+
+        for s in &sources {
+            if s == &destination {
+                return Err(anyhow!(format!(
+                    "The \"{}\" can't be the source and the destination at the same time",
+                    s
+                )));
+            }
+        }
+
+        for s in sources {
+            let new_file_name = if is_destination_file || is_destination_not_exist {
+                destination.to_string()
+            } else {
+                let filename = Path::new(&s)
+                    .file_name()
+                    .ok_or_else(|| anyhow!("Invalid source path"))?;
+                Path::new(&destination)
+                    .join(filename)
+                    .to_string_lossy()
+                    .to_string()
+            };
+
+            println!("copy {s} to {new_file_name}");
+
+            let copy_result = tokio::fs::copy(s, new_file_name).await;
+            match copy_result {
+                result::Result::Ok(_) => (),
+                Err(error) => return Err(anyhow!(error)),
+            }
+        }
+        Ok(String::from("done\n"))
+    }
+
     async fn mv(&self, paths: &Vec<String>) -> CrateResult<String> {
         if paths.len() != 2 {
-            return Err(anyhow!("mv requires exactly two arguments: source and destination"));
+            return Err(anyhow!(
+                "mv requires exactly two arguments: source and destination"
+            ));
         }
 
         let source = &paths[0];
@@ -153,7 +222,12 @@ impl Executor {
         // Check if source exists
         let source_metadata = match fs::metadata(&source_path).await {
             ResultOk(meta) => meta,
-            Err(_) => return Err(anyhow!("cannot stat '{}': No such file or directory", source)),
+            Err(_) => {
+                return Err(anyhow!(
+                    "cannot stat '{}': No such file or directory",
+                    source
+                ))
+            }
         };
 
         // Check if destination exists
@@ -163,7 +237,8 @@ impl Executor {
         // Determine final destination path
         let final_dest = if is_dest_dir {
             // If destination is a directory, move source into it
-            let source_name = Path::new(source).file_name()
+            let source_name = Path::new(source)
+                .file_name()
                 .and_then(|n| n.to_str())
                 .ok_or_else(|| anyhow!("invalid source filename"))?;
             format!("{}/{}", dest_path, source_name)
@@ -182,29 +257,44 @@ impl Executor {
             Err(e) => {
                 // If rename fails due to cross-device error, use copy + remove
                 if e.raw_os_error() == Some(18) || e.to_string().contains("cross-device") {
-                    return self.move_cross_device(&source_path, &final_dest, source_metadata.is_dir()).await;
+                    return self
+                        .move_cross_device(&source_path, &final_dest, source_metadata.is_dir())
+                        .await;
                 }
                 return Err(anyhow!("cannot move '{}' to '{}': {}", source, dest, e));
             }
         }
     }
 
-    async fn move_cross_device(&self, source: &str, dest: &str, is_dir: bool) -> CrateResult<String> {
+    async fn move_cross_device(
+        &self,
+        source: &str,
+        dest: &str,
+        is_dir: bool,
+    ) -> CrateResult<String> {
         if is_dir {
             self.copy_directory_recursive(source, dest).await?;
-            remove_dir_all(source).await.map_err(|e| anyhow!("failed to remove source directory '{}': {}", source, e))?;
+            remove_dir_all(source)
+                .await
+                .map_err(|e| anyhow!("failed to remove source directory '{}': {}", source, e))?;
         } else {
-            fs::copy(source, dest).await.map_err(|e| anyhow!("failed to copy file '{}' to '{}': {}", source, dest, e))?;
-            remove_file(source).await.map_err(|e| anyhow!("failed to remove source file '{}': {}", source, e))?;
+            fs::copy(source, dest)
+                .await
+                .map_err(|e| anyhow!("failed to copy file '{}' to '{}': {}", source, dest, e))?;
+            remove_file(source)
+                .await
+                .map_err(|e| anyhow!("failed to remove source file '{}': {}", source, e))?;
         }
         Ok(String::new())
     }
 
     async fn copy_directory_recursive(&self, source: &str, dest: &str) -> CrateResult<()> {
         use std::collections::VecDeque;
-        
+
         // Create destination directory
-        create_dir_all(dest).await.map_err(|e| anyhow!("failed to create directory '{}': {}", dest, e))?;
+        create_dir_all(dest)
+            .await
+            .map_err(|e| anyhow!("failed to create directory '{}': {}", dest, e))?;
 
         // Use a queue for iterative directory traversal
         let mut queue = VecDeque::new();
@@ -212,23 +302,59 @@ impl Executor {
 
         while let Some((current_source, current_dest)) = queue.pop_front() {
             // Read current directory
-            let mut entries = fs::read_dir(&current_source).await.map_err(|e| anyhow!("failed to read directory '{}': {}", current_source, e))?;
+            let mut entries = fs::read_dir(&current_source)
+                .await
+                .map_err(|e| anyhow!("failed to read directory '{}': {}", current_source, e))?;
 
-            while let Some(entry) = entries.next_entry().await.map_err(|e| anyhow!("failed to read directory entry: {}", e))? {
+            while let Some(entry) = entries
+                .next_entry()
+                .await
+                .map_err(|e| anyhow!("failed to read directory entry: {}", e))?
+            {
                 let entry_path = entry.path();
                 let entry_name = entry.file_name();
                 let dest_path = Path::new(&current_dest).join(&entry_name);
 
-                if entry.metadata().await.map_err(|e| anyhow!("failed to get metadata for '{}': {}", entry_path.display(), e))?.is_dir() {
+                if entry
+                    .metadata()
+                    .await
+                    .map_err(|e| {
+                        anyhow!(
+                            "failed to get metadata for '{}': {}",
+                            entry_path.display(),
+                            e
+                        )
+                    })?
+                    .is_dir()
+                {
                     // Create subdirectory and add to queue
-                    create_dir_all(&dest_path).await.map_err(|e| anyhow!("failed to create directory '{}': {}", dest_path.display(), e))?;
+                    create_dir_all(&dest_path).await.map_err(|e| {
+                        anyhow!(
+                            "failed to create directory '{}': {}",
+                            dest_path.display(),
+                            e
+                        )
+                    })?;
                     queue.push_back((
-                        entry_path.to_str().ok_or_else(|| anyhow!("invalid path"))?.to_string(),
-                        dest_path.to_str().ok_or_else(|| anyhow!("invalid path"))?.to_string()
+                        entry_path
+                            .to_str()
+                            .ok_or_else(|| anyhow!("invalid path"))?
+                            .to_string(),
+                        dest_path
+                            .to_str()
+                            .ok_or_else(|| anyhow!("invalid path"))?
+                            .to_string(),
                     ));
                 } else {
                     // Copy file
-                    fs::copy(&entry_path, &dest_path).await.map_err(|e| anyhow!("failed to copy file '{}' to '{}': {}", entry_path.display(), dest_path.display(), e))?;
+                    fs::copy(&entry_path, &dest_path).await.map_err(|e| {
+                        anyhow!(
+                            "failed to copy file '{}' to '{}': {}",
+                            entry_path.display(),
+                            dest_path.display(),
+                            e
+                        )
+                    })?;
                 }
             }
         }
@@ -238,7 +364,7 @@ impl Executor {
 
     async fn ls(&self, ls: &crate::command::Ls) -> CrateResult<String> {
         let mut result = String::new();
-        
+
         // Determine which directories to list
         let dirs_to_list = if ls.dirs.is_empty() {
             vec![".".to_string()]
@@ -257,7 +383,7 @@ impl Executor {
             match std::fs::read_dir(&full_path) {
                 std::result::Result::Ok(entries) => {
                     let mut file_names = Vec::new();
-                    
+
                     for entry in entries {
                         match entry {
                             std::result::Result::Ok(entry) => {
@@ -270,10 +396,14 @@ impl Executor {
                             }
                         }
                     }
-                    
+
                     // Sort the file names
                     file_names.sort();
+
                     
+
+
+
                     // Apply flags
                     match ls.flag.as_str() {
                         "-a" => {
@@ -285,7 +415,8 @@ impl Executor {
                         "-l" => {
                             // Long format - for now just show names with basic info
                             for name in file_names {
-                                if !name.starts_with('.') { // Skip hidden files for -l
+                                if !name.starts_with('.') {
+                                    // Skip hidden files for -l
                                     result.push_str(&format!("{}\n", name));
                                 }
                             }
@@ -293,7 +424,8 @@ impl Executor {
                         "-F" => {
                             // Add indicators for file types
                             for name in file_names {
-                                if !name.starts_with('.') { // Skip hidden files for -F
+                                if !name.starts_with('.') {
+                                    // Skip hidden files for -F
                                     result.push_str(&format!("{}\n", name));
                                 }
                             }
@@ -313,7 +445,7 @@ impl Executor {
                 }
             }
         }
-        
+
         Ok(result)
     }
 }

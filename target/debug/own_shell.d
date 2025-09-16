@@ -1,1 +1,0 @@
-C:\Users\HP\Desktop\own_shell\target\debug\own_shell.exe: C:\Users\HP\Desktop\own_shell\src\command.rs C:\Users\HP\Desktop\own_shell\src\errors.rs C:\Users\HP\Desktop\own_shell\src\executor.rs C:\Users\HP\Desktop\own_shell\src\main.rs
