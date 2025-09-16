@@ -239,29 +239,6 @@ impl Executor {
                 }
             };
 
-        // If we have multiple sources, destination must be a directory
-        if sources.len() > 1 && dest_metadata.is_some() && !is_dest_dir {
-            return Err(anyhow!("cannot move multiple files: destination '{}' is not a directory", dest));
-        }
-
-        // Move each source to the destination
-        for source in sources {
-            // Resolve absolute path for source
-            let source_path = if source.starts_with("/") {
-                source.clone()
-            } else {
-                format!("{}/{}", self.current_dir, source)
-            };
-
-            // Check if source exists
-            let source_metadata = match fs::metadata(&source_path).await {
-                ResultOk(meta) => meta,
-                Err(_) => {
-                    eprintln!("cannot stat '{}': No such file or directory", source);
-                    continue; // Skip this source and continue with others
-                }
-            };
-
         // Determine final destination path
         let final_dest = if is_dest_dir {
             // If destination is a directory, move source into it
