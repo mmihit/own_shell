@@ -130,88 +130,107 @@ impl Executor {
     }
 
     async fn mv(&self, paths: &Vec<String>) -> CrateResult<String> {
-        if paths.len() != 2 {
-            return Err(anyhow!("mv requires exactly two arguments: source and destination"));
+        if paths.len() < 2 {
+            return Err(anyhow!("mv requires at least two arguments: ccsource(s) and destination"));
         }
 
-        let source = &paths[0];
-        let dest = &paths[1];
+        // The last argument is the destination
+        let dest = &paths[paths.len() - 1];
+        let sources = &paths[..paths.len() - 1];
 
-        // Resolve absolute paths
-        let source_path = if source.starts_with("/") {
-            source.clone()
-        } else {
-            format!("{}/{}", self.current_dir, source)
-        };
-
+        // Resolve absolute path for destination
         let dest_path = if dest.starts_with("/") {
             dest.clone()
         } else {
             format!("{}/{}", self.current_dir, dest)
         };
 
-        // Check if source exists
-        let source_metadata = match fs::metadata(&source_path).await {
-            ResultOk(meta) => meta,
-            Err(_) => return Err(anyhow!("cannot stat '{}': No such file or directory", source)),
-        };
-
-        // Check if destination exists
+        // Check if destination exists and is a directory
         let dest_metadata = fs::metadata(&dest_path).await.ok();
         let is_dest_dir = dest_metadata.as_ref().map(|m| m.is_dir()).unwrap_or(false);
 
-        // Determine final destination path
-        let final_dest = if is_dest_dir {
-            // If destination is a directory, move source into it
-            let source_name = Path::new(source).file_name()
-                .and_then(|n| n.to_str())
-                .ok_or_else(|| anyhow!("invalid source filename"))?;
-            format!("{}/{}", dest_path, source_name)
-        } else {
-            dest_path.clone()
-        };
-
-        // Check if source and destination are the same
-        if source_path == final_dest {
-            return Ok(String::new()); // No-op
+        // If we have multiple sources, destination must be a directory
+        if sources.len() > 1 && dest_metadata.is_some() && !is_dest_dir {
+            return Err(anyhow!("cannot move multiple files: destination '{}' is not a directory", dest));
         }
 
-        // Try fast path: rename
-        match fs::rename(&source_path, &final_dest).await {
-            ResultOk(_) => return Ok(String::new()),
-            Err(e) => {
-                // If rename fails due to cross-device error, use copy + remove
-                if e.raw_os_error() == Some(18) || e.to_string().contains("cross-device") {
-                    return self.move_cross_device(&source_path, &final_dest, source_metadata.is_dir()).await;
+        // Move each source to the destination
+        for source in sources {
+            // Resolve absolute path for source
+            let source_path = if source.starts_with("/") {
+                source.clone()
+            } else {
+                format!("{}/{}", self.current_dir, source)
+            };
+
+            // Check if source exists
+            let source_metadata = match fs::metadata(&source_path).await {
+                ResultOk(meta) => meta,
+                Err(_) => {
+                    eprintln!("cannot stat '{}': No such file or directory", source);
+                    continue; // Skip this source and continue with others
                 }
-                return Err(anyhow!("cannot move '{}' to '{}': {}", source, dest, e));
+            };
+
+            // Determine final destination path
+            let final_dest = if is_dest_dir {
+                // If destination is a directory, move source into it
+                let source_name = Path::new(source).file_name()
+                    .and_then(|n| n.to_str())
+                    .ok_or_else(|| anyhow!("invalid source filename"))?;
+                format!("{}/{}", dest_path, source_name)
+            } else {
+                dest_path.clone()
+            };
+
+            // Check if source and destination are the same
+            if source_path == final_dest {
+                continue; // No-op, skip this source
+            }
+
+            // Try fast path: rename
+            match fs::rename(&source_path, &final_dest).await {
+                ResultOk(_) => continue, // Success, continue with next source
+                Err(e) => {
+                    // If rename fails due to cross-device error, use copy + remove
+                    if e.raw_os_error() == Some(18) || e.to_string().contains("cross-device") {
+                        if let Err(cross_err) = self.move_cross_device(&source_path, &final_dest, source_metadata.is_dir()).await {
+                            eprintln!("cannot move '{}' to '{}': {}", source, dest, cross_err);
+                        }
+                        continue;
+                    }
+                    eprintln!("cannot move '{}' to '{}': {}", source, dest, e);
+                    continue; // Continue with other sources even if one fails
+                }
             }
         }
-    }
 
-    async fn move_cross_device(&self, source: &str, dest: &str, is_dir: bool) -> CrateResult<String> {
-        if is_dir {
-            self.copy_directory_recursive(source, dest).await?;
-            remove_dir_all(source).await.map_err(|e| anyhow!("failed to remove source directory '{}': {}", source, e))?;
-        } else {
-            fs::copy(source, dest).await.map_err(|e| anyhow!("failed to copy file '{}' to '{}': {}", source, dest, e))?;
-            remove_file(source).await.map_err(|e| anyhow!("failed to remove source file '{}': {}", source, e))?;
-        }
         Ok(String::new())
     }
+
+        async fn move_cross_device(&self, source: &str, dest: &str, is_dir: bool) -> CrateResult<String> {
+            if is_dir {
+                self.copy_directory_recursive(source, dest).await?;
+                remove_dir_all(source).await.map_err(|e| anyhow!("failed to remove source directory '{}': {}", source, e))?;
+            } else {
+                fs::copy(source, dest).await.map_err(|e| anyhow!("failed to copy file '{}' to '{}': {}", source, dest, e))?;
+                remove_file(source).await.map_err(|e| anyhow!("failed to remove source file '{}': {}", source, e))?;
+            }
+            Ok(String::new())
+        }
 
     async fn copy_directory_recursive(&self, source: &str, dest: &str) -> CrateResult<()> {
         use std::collections::VecDeque;
         
-        // Create destination directory
+        // create destination directory
         create_dir_all(dest).await.map_err(|e| anyhow!("failed to create directory '{}': {}", dest, e))?;
 
-        // Use a queue for iterative directory traversal
+        // use a queue for iterative directory traversal
         let mut queue = VecDeque::new();
         queue.push_back((source.to_string(), dest.to_string()));
 
         while let Some((current_source, current_dest)) = queue.pop_front() {
-            // Read current directory
+            // read current directory
             let mut entries = fs::read_dir(&current_source).await.map_err(|e| anyhow!("failed to read directory '{}': {}", current_source, e))?;
 
             while let Some(entry) = entries.next_entry().await.map_err(|e| anyhow!("failed to read directory entry: {}", e))? {
@@ -220,14 +239,14 @@ impl Executor {
                 let dest_path = Path::new(&current_dest).join(&entry_name);
 
                 if entry.metadata().await.map_err(|e| anyhow!("failed to get metadata for '{}': {}", entry_path.display(), e))?.is_dir() {
-                    // Create subdirectory and add to queue
+                    // create subdirectory and add to queue
                     create_dir_all(&dest_path).await.map_err(|e| anyhow!("failed to create directory '{}': {}", dest_path.display(), e))?;
                     queue.push_back((
                         entry_path.to_str().ok_or_else(|| anyhow!("invalid path"))?.to_string(),
                         dest_path.to_str().ok_or_else(|| anyhow!("invalid path"))?.to_string()
                     ));
                 } else {
-                    // Copy file
+                    // copy file
                     fs::copy(&entry_path, &dest_path).await.map_err(|e| anyhow!("failed to copy file '{}' to '{}': {}", entry_path.display(), dest_path.display(), e))?;
                 }
             }
