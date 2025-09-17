@@ -1,15 +1,30 @@
+struct FileInfo {
+    name: String,
+    file_type: String,      // "dir"/"file" if -F flag
+    permissions: String,    // "rwxr-xr-x" if -l flag  
+    size: String,           // 1024 if -l flag
+    modified: String,       // "Jan 15 10:30" if -l flag
+    user: String,           // "Jan 15 10:30" if -l flag
+    role: String,           // "Jan 15 10:30" if -l flag
+}
+
+struct Directory {
+    name: String,
+    file_content: Vec<FileInfo>,
+}
+
 exemple: dir=> folder1, folder2, folder3 file1
 
 ls:
 [
-    Hashmap{
+    Directory{
         name: ".",
         file_content: [
-            {
-                file_name: "folder1",
+            FileInfo{
+                name: "folder1",
             },
-            {
-                file_name: "folder2",
+            FileInfo{
+                name: "folder2",
             }
         ]
     }
@@ -17,15 +32,15 @@ ls:
 
 ls -F:
 [
-    Hashmap{
+    Directory{
         name: ".",
         file_content: [
-            {
-                file_name: "folder1",
+            FileInfo{
+                name: "folder1",
                 type: "folder",
             },
-            {
-                file_name: "folder2",
+            FileInfo{
+                name: "folder2",
                 type: "folder",
             }
         ]
@@ -34,20 +49,20 @@ ls -F:
 
 ls -a:
 [
-    Hashmap{
+    Directory{
         name: ".",
         file_content: [
-            {
-                file_name: ".",
+            FileInfo{
+                name: ".",
             },
-            {
-                file_name: "..",
+            FileInfo{
+                name: "..",
             },
-            {
-                file_name: "folder1",
+            FileInfo{
+                name: "folder1",
             },
-            {
-                file_name: "folder2",
+            FileInfo{
+                name: "folder2",
             },...(hidden files)
         ]
     }
@@ -55,24 +70,24 @@ ls -a:
 
 ls -l:
 [
-    Hashmap{
+    Directory{
         name: ".",
         file_content: [
-            {
-                file_name: "folder1",
+            FileInfo{
+                name: "folder1",
                 type: "folder",
                 user:String,
                 role:String,
-                time: String,
+                modified: String,
                 file_type: Option<FileType>,
                 size: Option<u64>,
             },
-            {
-                file_name: "folder2",
+            FileInfo{
+                name: "folder2",
                 type: "folder",
                 user:String,
                 role:String,
-                time: String,
+                modified: String,
                 file_type: Option<FileType>,
                 size: Option<u64>,
             }
