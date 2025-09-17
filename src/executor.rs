@@ -1,9 +1,9 @@
-use crate::command::{Command, Rm};
+use crate::command::{ Command, Rm };
 use crate::errors::CrateResult;
-use anyhow::{anyhow, Ok};
+use anyhow::{ anyhow, Ok };
 use std::result::Result::Ok as ResultOk;
-use std::{path::Path, result};
-use tokio::fs::{self, create_dir_all, read_to_string, remove_dir_all, remove_file};
+use std::{ path::Path, result };
+use tokio::fs::{ self, create_dir_all, read_to_string, remove_dir_all, remove_file };
 
 pub struct Executor {
     pub current_dir: String,
@@ -72,10 +72,7 @@ impl Executor {
             match fs::create_dir(&full_path).await {
                 result::Result::Ok(()) => (),
                 result::Result::Err(err) => {
-                    res = Err(anyhow!(format!(
-                        "cannot create directory '{}': {}",
-                        path, err
-                    )));
+                    res = Err(anyhow!(format!("cannot create directory '{}': {}", path, err)));
                 }
             }
         }
@@ -99,12 +96,13 @@ impl Executor {
 
             match action {
                 result::Result::Ok(()) => (),
-                result::Result::Err(err) => match remove_file(&path).await {
-                    result::Result::Ok(()) => (),
-                    result::Result::Err(_) => {
-                        res = Err(anyhow!("cannot remove '{}': {}", path, err));
+                result::Result::Err(err) =>
+                    match remove_file(&path).await {
+                        result::Result::Ok(()) => (),
+                        result::Result::Err(_) => {
+                            res = Err(anyhow!("cannot remove '{}': {}", path, err));
+                        }
                     }
-                },
             }
         }
         return res;
@@ -119,8 +117,10 @@ impl Executor {
                 format!("{}/{}", self.current_dir, path)
             };
             match read_to_string(full_path).await {
-                result::Result::Ok(content) => res.push_str(&(content)),
-                result::Result::Err(err) => res = format!("{}Error: {}: {}\n", res, path, err),
+                result::Result::Ok(content) => res.push_str(&content),
+                result::Result::Err(err) => {
+                    res = format!("{}Error: {}: {}\n", res, path, err);
+                }
             }
         }
         return Ok(res);
@@ -150,7 +150,7 @@ impl Executor {
             }
             result::Result::Ok(metadata) => {
                 if metadata.is_file() {
-                    is_destination_file = true
+                    is_destination_file = true;
                 }
                 if sources.len() > 1 && is_destination_file {
                     return Err(anyhow!("The destination should be a directory"));
@@ -162,10 +162,11 @@ impl Executor {
 
         for s in &sources {
             if s == &destination {
-                return Err(anyhow!(format!(
-                    "The \"{}\" can't be the source and the destination at the same time",
-                    s
-                )));
+                return Err(
+                    anyhow!(
+                        format!("The \"{}\" can't be the source and the destination at the same time", s)
+                    )
+                );
             }
         }
 
@@ -176,10 +177,7 @@ impl Executor {
                 let filename = Path::new(&s)
                     .file_name()
                     .ok_or_else(|| anyhow!("Invalid source path"))?;
-                Path::new(&destination)
-                    .join(filename)
-                    .to_string_lossy()
-                    .to_string()
+                Path::new(&destination).join(filename).to_string_lossy().to_string()
             };
 
             println!("copy {s} to {new_file_name}");
@@ -187,7 +185,9 @@ impl Executor {
             let copy_result = tokio::fs::copy(s, new_file_name).await;
             match copy_result {
                 result::Result::Ok(_) => (),
-                Err(error) => return Err(anyhow!(error)),
+                Err(error) => {
+                    return Err(anyhow!(error));
+                }
             }
         }
         Ok(String::from("done\n"))
@@ -211,11 +211,16 @@ impl Executor {
 
         // Check if destination exists and is a directory
         let dest_metadata = fs::metadata(&dest_path).await.ok();
-        let is_dest_dir = dest_metadata.as_ref().map(|m| m.is_dir()).unwrap_or(false);
+        let is_dest_dir = dest_metadata
+            .as_ref()
+            .map(|m| m.is_dir())
+            .unwrap_or(false);
 
         // If we have multiple sources, destination must be a directory
         if sources.len() > 1 && dest_metadata.is_some() && !is_dest_dir {
-            return Err(anyhow!("cannot move multiple files: destination '{}' is not a directory", dest));
+            return Err(
+                anyhow!("cannot move multiple files: destination '{}' is not a directory", dest)
+            );
         }
 
         // Move each source to the destination
@@ -236,16 +241,17 @@ impl Executor {
                 }
             };
 
-        // Determine final destination path
-        let final_dest = if is_dest_dir {
-            // If destination is a directory, move source into it
-            let source_name = Path::new(source).file_name()
-                .and_then(|n| n.to_str())
-                .ok_or_else(|| anyhow!("invalid source filename"))?;
-            format!("{}/{}", dest_path, source_name)
-        } else {
-            dest_path.clone()
-        };
+            // Determine final destination path
+            let final_dest = if is_dest_dir {
+                // If destination is a directory, move source into it
+                let source_name = Path::new(source)
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .ok_or_else(|| anyhow!("invalid source filename"))?;
+                format!("{}/{}", dest_path, source_name)
+            } else {
+                dest_path.clone()
+            };
 
             // Check if source and destination are the same
             if source_path == final_dest {
@@ -254,11 +260,19 @@ impl Executor {
 
             // Try fast path: rename
             match fs::rename(&source_path, &final_dest).await {
-                ResultOk(_) => continue, // Success, continue with next source
+                ResultOk(_) => {
+                    continue;
+                } // Success, continue with next source
                 Err(e) => {
                     // If rename fails due to cross-device error, use copy + remove
                     if e.raw_os_error() == Some(18) || e.to_string().contains("cross-device") {
-                        if let Err(cross_err) = self.move_cross_device(&source_path, &final_dest, source_metadata.is_dir()).await {
+                        if
+                            let Err(cross_err) = self.move_cross_device(
+                                &source_path,
+                                &final_dest,
+                                source_metadata.is_dir()
+                            ).await
+                        {
                             eprintln!("cannot move '{}' to '{}': {}", source, dest, cross_err);
                         }
                         continue;
@@ -272,22 +286,35 @@ impl Executor {
         Ok(String::new())
     }
 
-        async fn move_cross_device(&self, source: &str, dest: &str, is_dir: bool) -> CrateResult<String> {
-            if is_dir {
-                self.copy_directory_recursive(source, dest).await?;
-                remove_dir_all(source).await.map_err(|e| anyhow!("failed to remove source directory '{}': {}", source, e))?;
-            } else {
-                fs::copy(source, dest).await.map_err(|e| anyhow!("failed to copy file '{}' to '{}': {}", source, dest, e))?;
-                remove_file(source).await.map_err(|e| anyhow!("failed to remove source file '{}': {}", source, e))?;
-            }
-            Ok(String::new())
+    async fn move_cross_device(
+        &self,
+        source: &str,
+        dest: &str,
+        is_dir: bool
+    ) -> CrateResult<String> {
+        if is_dir {
+            self.copy_directory_recursive(source, dest).await?;
+            remove_dir_all(source).await.map_err(|e|
+                anyhow!("failed to remove source directory '{}': {}", source, e)
+            )?;
+        } else {
+            fs
+                ::copy(source, dest).await
+                .map_err(|e| anyhow!("failed to copy file '{}' to '{}': {}", source, dest, e))?;
+            remove_file(source).await.map_err(|e|
+                anyhow!("failed to remove source file '{}': {}", source, e)
+            )?;
         }
+        Ok(String::new())
+    }
 
     async fn copy_directory_recursive(&self, source: &str, dest: &str) -> CrateResult<()> {
         use std::collections::VecDeque;
-        
+
         // create destination directory
-        create_dir_all(dest).await.map_err(|e| anyhow!("failed to create directory '{}': {}", dest, e))?;
+        create_dir_all(dest).await.map_err(|e|
+            anyhow!("failed to create directory '{}': {}", dest, e)
+        )?;
 
         // use a queue for iterative directory traversal
         let mut queue = VecDeque::new();
@@ -295,20 +322,31 @@ impl Executor {
 
         while let Some((current_source, current_dest)) = queue.pop_front() {
             // read current directory
-            let mut entries = fs::read_dir(&current_source).await.map_err(|e| anyhow!("failed to read directory '{}': {}", current_source, e))?;
+            let mut entries = fs
+                ::read_dir(&current_source).await
+                .map_err(|e| anyhow!("failed to read directory '{}': {}", current_source, e))?;
 
-            while let Some(entry) = entries
-                .next_entry()
-                .await
-                .map_err(|e| anyhow!("failed to read directory entry: {}", e))?
+            while
+                let Some(entry) = entries
+                    .next_entry().await
+                    .map_err(|e| anyhow!("failed to read directory entry: {}", e))?
             {
                 let entry_path = entry.path();
                 let entry_name = entry.file_name();
                 let dest_path = Path::new(&current_dest).join(&entry_name);
 
-                if entry.metadata().await.map_err(|e| anyhow!("failed to get metadata for '{}': {}", entry_path.display(), e))?.is_dir() {
+                if
+                    entry
+                        .metadata().await
+                        .map_err(|e|
+                            anyhow!("failed to get metadata for '{}': {}", entry_path.display(), e)
+                        )?
+                        .is_dir()
+                {
                     // create subdirectory and add to queue
-                    create_dir_all(&dest_path).await.map_err(|e| anyhow!("failed to create directory '{}': {}", dest_path.display(), e))?;
+                    create_dir_all(&dest_path).await.map_err(|e|
+                        anyhow!("failed to create directory '{}': {}", dest_path.display(), e)
+                    )?;
                     queue.push_back((
                         entry_path
                             .to_str()
@@ -321,7 +359,16 @@ impl Executor {
                     ));
                 } else {
                     // copy file
-                    fs::copy(&entry_path, &dest_path).await.map_err(|e| anyhow!("failed to copy file '{}' to '{}': {}", entry_path.display(), dest_path.display(), e))?;
+                    fs
+                        ::copy(&entry_path, &dest_path).await
+                        .map_err(|e|
+                            anyhow!(
+                                "failed to copy file '{}' to '{}': {}",
+                                entry_path.display(),
+                                dest_path.display(),
+                                e
+                            )
+                        )?;
                 }
             }
         }
@@ -333,11 +380,7 @@ impl Executor {
         let mut result = String::new();
 
         // Determine which directories to list
-        let dirs_to_list = if ls.dirs.is_empty() {
-            vec![".".to_string()]
-        } else {
-            ls.dirs.clone()
-        };
+        let dirs_to_list = if ls.dirs.is_empty() { vec![".".to_string()] } else { ls.dirs.clone() };
 
         for dir in dirs_to_list {
             let full_path = if dir.starts_with("/") {
@@ -367,45 +410,45 @@ impl Executor {
                     // Sort the file names
                     file_names.sort();
 
-                    
-
-
+                    for name in file_names {
+                        result.push_str(&format!("{}\n", name));
+                    }
 
                     // Apply flags
-                    match ls.flag.as_str() {
-                        "-a" => {
-                            // Show all files including hidden ones (starting with .)
-                            for name in file_names {
-                                result.push_str(&format!("{}\n", name));
-                            }
-                        }
-                        "-l" => {
-                            // Long format - for now just show names with basic info
-                            for name in file_names {
-                                if !name.starts_with('.') {
-                                    // Skip hidden files for -l
-                                    result.push_str(&format!("{}\n", name));
-                                }
-                            }
-                        }
-                        "-F" => {
-                            // Add indicators for file types
-                            for name in file_names {
-                                if !name.starts_with('.') {
-                                    // Skip hidden files for -F
-                                    result.push_str(&format!("{}\n", name));
-                                }
-                            }
-                        }
-                        _ => {
-                            // Default behavior - show non-hidden files
-                            for name in file_names {
-                                if !name.starts_with('.') {
-                                    result.push_str(&format!("{}\n", name));
-                                }
-                            }
-                        }
-                    }
+                    // match ls.flag.as_str() {
+                    //     "-a" => {
+                    //         // Show all files including hidden ones (starting with .)
+                    //         for name in file_names {
+                    //             result.push_str(&format!("{}\n", name));
+                    //         }
+                    //     }
+                    //     "-l" => {
+                    //         // Long format - for now just show names with basic info
+                    //         for name in file_names {
+                    //             if !name.starts_with('.') {
+                    //                 // Skip hidden files for -l
+                    //                 result.push_str(&format!("{}\n", name));
+                    //             }
+                    //         }
+                    //     }
+                    //     "-F" => {
+                    //         // Add indicators for file types
+                    //         for name in file_names {
+                    //             if !name.starts_with('.') {
+                    //                 // Skip hidden files for -F
+                    //                 result.push_str(&format!("{}\n", name));
+                    //             }
+                    //         }
+                    //     }
+                    //     _ => {
+                    //         // Default behavior - show non-hidden files
+                    //         for name in file_names {
+                    //             if !name.starts_with('.') {
+                    //                 result.push_str(&format!("{}\n", name));
+                    //             }
+                    //         }
+                    //     }
+                    // }
                 }
                 std::result::Result::Err(e) => {
                     return Err(anyhow!("Cannot read directory '{}': {}", dir, e));

@@ -34,7 +34,7 @@ pub async fn handle_quotes(input: &str, stdout: &mut BufWriter<Stdout>) -> io::R
         }
     }
 
-    Ok(process_shell_quotes(&final_input))
+    Ok(process_shell_quotes(&final_input.trim()))
 }
 
 #[derive(Debug, PartialEq)]
@@ -153,6 +153,12 @@ fn process_shell_quotes(input: &str) -> String {
                     result.push(ch);
                     i += 1;
                 }
+            },
+            ' '=> {
+                if i>0 && chars[i-1] == ' ' {
+                    result.push(ch)
+                }
+                i+=1
             },
             _ => {
                 result.push(ch);

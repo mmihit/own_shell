@@ -24,7 +24,6 @@ fn spawn_user_input_handle() -> JoinHandle<CrateResult<()>> {
         stdout.flush().await?;
         while let Ok(Some(line)) = reader.next_line().await {
             let input = line.as_str();
-
             // Get the complete input with closed quotes
             let complete_input = match handle_quotes(input, &mut stdout).await {
                 Ok(complete) => complete,
@@ -33,8 +32,8 @@ fn spawn_user_input_handle() -> JoinHandle<CrateResult<()>> {
                     continue;
                 }
             };
-
-            match complete_input.replace("  ", " ").as_str() {
+            println!("complete input is: {complete_input}");
+            match complete_input.as_str() {
                 "" => (),
                 processed_input =>
                     match Command::try_from(processed_input) {
