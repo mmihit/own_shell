@@ -2,7 +2,7 @@ use crate::command::{Command, Rm};
 use crate::errors::CrateResult;
 use anyhow::{anyhow, Ok};
 use std::result::Result::Ok as ResultOk;
-use std::{env, path::Path, result};
+use std::{path::Path, result};
 use tokio::fs::{self, create_dir_all, read_to_string, remove_dir_all, remove_file};
 
 pub struct Executor {
@@ -41,16 +41,13 @@ impl Executor {
         Ok(String::new())
     }
     fn echo(&self, input: &String) -> CrateResult<String> {
-        Ok(format!(
-            "{}\n",
-            input.to_string().replace("\"", "").replace("\'", "")
-        ))
+        Ok(format!("{}\n", input))
     }
 
     fn cd(&mut self, input: &String) -> CrateResult<String> {
         let mut input = input.clone();
         if input.len() == 0 {
-            if let Some(home_path) = env::home_dir() {
+            if let Some(home_path) = dirs::home_dir() {
                 input = home_path.to_str().unwrap().to_string();
             } else {
                 return Err(anyhow!("something wrong, please fix it!..\n"));
