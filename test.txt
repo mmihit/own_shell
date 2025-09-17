@@ -1,0 +1,81 @@
+exemple: dir=> folder1, folder2, folder3 file1
+
+ls:
+[
+    Hashmap{
+        name: ".",
+        file_content: [
+            {
+                file_name: "folder1",
+            },
+            {
+                file_name: "folder2",
+            }
+        ]
+    }
+]
+
+ls -F:
+[
+    Hashmap{
+        name: ".",
+        file_content: [
+            {
+                file_name: "folder1",
+                type: "folder",
+            },
+            {
+                file_name: "folder2",
+                type: "folder",
+            }
+        ]
+    }
+]
+
+ls -a:
+[
+    Hashmap{
+        name: ".",
+        file_content: [
+            {
+                file_name: ".",
+            },
+            {
+                file_name: "..",
+            },
+            {
+                file_name: "folder1",
+            },
+            {
+                file_name: "folder2",
+            },...(hidden files)
+        ]
+    }
+]
+
+ls -l:
+[
+    Hashmap{
+        name: ".",
+        file_content: [
+            {
+                file_name: "folder1",
+                type: "folder",
+                user:String,
+                role:String,
+                time: String,
+                file_type: Option<FileType>,
+                size: Option<u64>,
+            },
+            {
+                file_name: "folder2",
+                type: "folder",
+                user:String,
+                role:String,
+                time: String,
+                file_type: Option<FileType>,
+                size: Option<u64>,
+            }
+        ]
+    }
+]

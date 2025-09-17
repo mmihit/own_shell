@@ -197,7 +197,7 @@ fn find_closing_quote(chars: &[char], start: usize, quote_char: char) -> Option<
     None // No closing quote found
 }
 
-fn collect_data(is_all:bool, is_classify: bool, is_listing:bool) -> Vec<HashMap<String, Vec<file_info>>> {
+fn collect_data(is_all:bool, is_classify: bool, is_listing:bool, dirs: Vec<String>) -> Vec<HashMap<String, Vec<file_info>>> {
     let result: Vec<HashMap<String, Vec<file_info>>> = vec![];
     
     return result
