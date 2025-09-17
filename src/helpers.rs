@@ -1,4 +1,15 @@
 use tokio::io::{ self, AsyncBufReadExt, AsyncWriteExt, BufWriter, Stdout };
+use std::collections::HashMap;
+use std::fs::FileType;
+
+struct file_info {
+    name:String,
+    user:String,
+    role:String,
+    time: String,
+    file_type: Option<FileType>,
+    size: Option<u64>,
+}
 
 pub async fn handle_quotes(input: &str, stdout: &mut BufWriter<Stdout>) -> io::Result<String> {
     let mut final_input = input.to_string();
@@ -184,4 +195,10 @@ fn find_closing_quote(chars: &[char], start: usize, quote_char: char) -> Option<
     }
     
     None // No closing quote found
+}
+
+fn collect_data(is_all:bool, is_classify: bool, is_listing:bool) -> Vec<HashMap<String, Vec<file_info>>> {
+    let result: Vec<HashMap<String, Vec<file_info>>> = vec![];
+    
+    return result
 }

@@ -379,10 +379,7 @@ impl Executor {
     async fn ls(&self, ls: &crate::command::Ls) -> CrateResult<String> {
         let mut result = String::new();
 
-        // Determine which directories to list
-        let dirs_to_list = if ls.dirs.is_empty() { vec![".".to_string()] } else { ls.dirs.clone() };
-
-        for dir in dirs_to_list {
+        for dir in &ls.dirs {
             let full_path = if dir.starts_with("/") {
                 dir.clone()
             } else {

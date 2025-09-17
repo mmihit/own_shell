@@ -69,34 +69,36 @@ impl TryFrom<&str> for Command {
                 return Ok(Self::Cd(input_slice[1..].join(" ")));
             }
 
-            "ls" => if input_slice.len() > 1 {
+            "ls" => {
                 let mut result = Ls::new();
-                for v in &input_slice[1..] {
-                    if v.starts_with("-") {
-                        for ch in v.chars().skip(1) {
-                            match ch {
-                                'a' => {
-                                    result.is_all = true;
-                                }
-                                'F' => {
-                                    result.is_classify=true
-                                }
-                                'l' => {
-                                    result.is_listing = true
-                                }
-                                _=> {
-                                    return Err(anyhow!("invalid option -{ch}"))
+                if input_slice.len() > 1 {
+                    for v in &input_slice[1..] {
+                        if v.starts_with("-") {
+                            for ch in v.chars().skip(1) {
+                                match ch {
+                                    'a' => {
+                                        result.is_all = true;
+                                    }
+                                    'F' => {
+                                        result.is_classify = true;
+                                    }
+                                    'l' => {
+                                        result.is_listing = true;
+                                    }
+                                    _ => {
+                                        return Err(anyhow!("invalid option -{ch}"));
+                                    }
                                 }
                             }
+                        } else {
+                            result.dirs.push(v.to_string());
                         }
-                    } else {
-                        result.dirs.push(v.to_string())
                     }
                 }
-                println!("{:?}", result);
-                return Ok(Self::Ls(result));
-            } else {
-                return Ok(Self::Ls(Ls::new()));
+                if result.dirs.len() == 0 {
+                    result.dirs.push(String::from("."))
+                }
+                return Ok(Self::Ls(result))
             }
 
             "echo" => if input_slice.len() < 2 {
