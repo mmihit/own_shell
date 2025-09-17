@@ -1,6 +1,8 @@
 use tokio::io::{ self, AsyncBufReadExt, AsyncWriteExt, BufWriter, Stdout };
 use std::collections::HashMap;
 use std::fs::FileType;
+use std::fs;
+use std::path::{Path, PathBuf};
 
 struct file_info {
     name:String,
@@ -197,8 +199,95 @@ fn find_closing_quote(chars: &[char], start: usize, quote_char: char) -> Option<
     None // No closing quote found
 }
 
-fn collect_data(is_all:bool, is_classify: bool, is_listing:bool, dirs: Vec<String>) -> Vec<HashMap<String, Vec<file_info>>> {
-    let result: Vec<HashMap<String, Vec<file_info>>> = vec![];
-    
-    return result
+
+
+
+
+
+
+#[derive(Debug, Clone)]
+pub struct FileInfo {
+    pub name: String,
+    pub r#type: String,  // check if it is a folder or a file
+}
+
+#[derive(Debug, Clone)]
+pub struct Directory {
+    pub name: String,
+    pub file_content: Vec<FileInfo>,
+}
+
+pub fn collect_data(is_all: bool, is_classify: bool, _is_listing: bool, dirs: Vec<String>) -> Vec<Directory> {
+    let mut results: Vec<Directory> = Vec::new();
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+
+    let effective_dirs = if dirs.is_empty() { vec![String::from(".")] } else { dirs };
+
+    for dir in effective_dirs {
+        let display_name = dir.clone();
+        let full_path = if Path::new(&dir).is_absolute() {
+            PathBuf::from(&dir)
+        } else {
+            cwd.join(&dir)
+        };
+
+        let mut entries: Vec<FileInfo> = Vec::new();
+
+        match fs::metadata(&full_path) {
+            Ok(md) if md.is_file() => {
+                let name = Path::new(&dir)
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or(&dir)
+                    .to_string();
+                entries.push(FileInfo { 
+                    name, 
+                    r#type: String::from("file") 
+                });
+            }
+            Ok(md) if md.is_dir() => {
+                if let Ok(read_dir) = fs::read_dir(&full_path) {
+                    for ent_res in read_dir {
+                        if let Ok(ent) = ent_res {
+                            let file_name = ent.file_name().to_string_lossy().to_string();
+
+                            if !is_all && file_name.starts_with('.') {
+                                continue;
+                            }
+
+                            let mut name = file_name.clone();
+                            let file_type = if let Ok(em) = ent.metadata() {
+                                if em.is_dir() {
+                                    if is_classify {
+                                        name.push('/');
+                                    }
+                                    String::from("folder")
+                                } else {
+                                    String::from("file")
+                                }
+                            } else {
+                                String::from("file")
+                            };
+
+                            entries.push(FileInfo { 
+                                name, 
+                                r#type: file_type 
+                            });
+                        }
+                    }
+                }
+                entries.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+            }
+            _ => {
+                // if path not exist (should handle it later)
+            }
+        }
+
+        results.push(Directory {
+            name: display_name,
+            file_content: entries,
+        });
+    }
+
+    results
 }
