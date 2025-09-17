@@ -3,6 +3,7 @@ use crate::errors::CrateResult;
 use anyhow::{ anyhow, Ok };
 use std::result::Result::Ok as ResultOk;
 use std::{ path::Path, result };
+use crate::helpers::collect_data;
 use tokio::fs::{ self, create_dir_all, read_to_string, remove_dir_all, remove_file };
 
 pub struct Executor {
@@ -377,6 +378,9 @@ impl Executor {
     }
 
     async fn ls(&self, ls: &crate::command::Ls) -> CrateResult<String> {
+        let directories = collect_data(ls.is_all, ls.is_classify, ls.is_listing, ls.dirs.clone());
+        
+        println!("{:#?}", directories);
         let mut result = String::new();
 
         for dir in &ls.dirs {
