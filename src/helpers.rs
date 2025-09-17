@@ -168,9 +168,8 @@ fn process_shell_quotes(input: &str) -> String {
                 }
             },
             ' '=> {
-                if i>0 && chars[i-1] == ' ' {
-                    result.push(ch)
-                }
+                // Preserve spaces so tokens remain separated (e.g., "ls folder1 folder2")
+                result.push(ch);
                 i+=1
             },
             _ => {
@@ -246,6 +245,12 @@ pub fn collect_data(is_all: bool, is_classify: bool, _is_listing: bool, dirs: Ve
                 });
             }
             Ok(md) if md.is_dir() => {
+                // When listing a specific directory (not "."), include '.' and '..' entries first
+                if display_name != "." {
+                    entries.push(FileInfo { name: String::from(".") , r#type: String::from("folder")});
+                    entries.push(FileInfo { name: String::from(".."), r#type: String::from("folder")});
+                }
+
                 if let Ok(read_dir) = fs::read_dir(&full_path) {
                     for ent_res in read_dir {
                         if let Ok(ent) = ent_res {
@@ -276,7 +281,16 @@ pub fn collect_data(is_all: bool, is_classify: bool, _is_listing: bool, dirs: Ve
                         }
                     }
                 }
-                entries.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+                // Keep '.' and '..' at the top (if present), then sort the rest
+                let mut dot_entries: Vec<FileInfo> = Vec::new();
+                let mut other_entries: Vec<FileInfo> = Vec::new();
+                for e in entries.into_iter() {
+                    if e.name == "." || e.name == ".." { dot_entries.push(e); } else { other_entries.push(e); }
+                }
+                other_entries.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+                let mut combined = dot_entries;
+                combined.extend(other_entries);
+                entries = combined;
             }
             _ => {
                 // if path not exist (should handle it later)
