@@ -42,7 +42,7 @@ impl TryFrom<&str> for Command {
     type Error = anyhow::Error;
 
     fn try_from(input: &str) -> Result<Self, Self::Error> {
-        let input_slice: Vec<&str> = input.split_whitespace().collect();
+        let input_slice  = split_preserve_quotes_simple(input);
         match input_slice[0].to_lowercase().as_str() {
             "exit" => Ok(Self::Exit),
 
@@ -55,7 +55,7 @@ impl TryFrom<&str> for Command {
             }
 
             "ls" => if input_slice.len() > 1 {
-                match input_slice[1] {
+                match input_slice[1].as_str() {
                     "-l" | "-a" | "-F" =>
                         Ok(
                             Self::Ls(
@@ -125,7 +125,7 @@ impl TryFrom<&str> for Command {
             "rm" => if input_slice.len() < 2 {
                 return Err(anyhow!("rm requires at least one argument"));
             } else {
-                match input_slice[1]   {
+                match input_slice[1].as_str()   {
                     "-r"=> if input_slice.len() > 2 {
                         return Ok(
                         Self::Rm(
@@ -175,4 +175,39 @@ impl TryFrom<&str> for Command {
             y => Err(anyhow!(format!("command <{}> not found", y))),
         }
     }
+}
+
+fn split_preserve_quotes_simple(input: &str) -> Vec<String> {
+    let mut result = Vec::new();
+    let mut current_token = String::new();
+    let mut inside_single_quotes = false;
+    let mut inside_double_quotes = false;
+    
+    for ch in input.chars() {
+        match ch {
+            '\'' if !inside_double_quotes => {
+                inside_single_quotes = !inside_single_quotes;
+                current_token.push(ch);
+            },
+            '"' if !inside_single_quotes => {
+                inside_double_quotes = !inside_double_quotes;
+                current_token.push(ch);
+            },
+            ' ' if !inside_single_quotes && !inside_double_quotes => {
+                if !current_token.is_empty() {
+                    result.push(current_token.clone());
+                    current_token.clear();
+                }
+            },
+            _ => {
+                current_token.push(ch);
+            }
+        }
+    }
+    
+    if !current_token.is_empty() {
+        result.push(current_token);
+    }
+    
+    result
 }
