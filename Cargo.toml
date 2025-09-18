@@ -10,3 +10,4 @@ tokio = { version = "1.43.0", features = ["full"] }
 anyhow = "1.0.95" 
 dirs = "5.0"
 libc = "0.2"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }

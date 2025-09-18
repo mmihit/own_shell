@@ -32,7 +32,6 @@ fn spawn_user_input_handle() -> JoinHandle<CrateResult<()>> {
                     continue;
                 }
             };
-            println!("complete input is: {complete_input}");
             match complete_input.as_str() {
                 "" => (),
                 processed_input =>

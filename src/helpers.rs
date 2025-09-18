@@ -211,7 +211,10 @@ pub struct FileInfo {
     pub group: String,
     pub permission_bits: usize,
     pub device_info: (usize,usize),
-    pub symlink_target: Option<String>
+    pub symlink_target: Option<String>,
+    pub links: u64,
+    pub size: u64,
+    pub modified_time: String,
 }
 
 #[derive(Debug, Clone)]
@@ -235,9 +238,6 @@ pub fn collect_data(
 
         let mut entries: Vec<FileInfo> = Vec::new();
 
-        println!("full path: {}", target_dir_path);
-        println!("{:?}", fs::metadata(&target_dir_path).unwrap().file_type());
-
         match fs::metadata(&target_dir_path) {
             Ok(md) if md.is_file() => {
                 let name = Path::new(&dir)
@@ -259,18 +259,23 @@ pub fn collect_data(
             Ok(md) if md.is_dir() => {
                 // When listing a specific directory (not "."), include '.' and '..' entries first
                 if is_all {
-                    entries.push(FileInfo {
+                    let mut dot = FileInfo {
                         name: String::from("."),
                         r#type: String::from("directory"),
                         full_path: (&target_dir_path).to_string(),
                         ..Default::default()
-                    });
-                    entries.push(FileInfo {
+                    };
+                    if _is_listing { populate_listing_info(&mut dot); }
+                    entries.push(dot);
+
+                    let mut dotdot = FileInfo {
                         name: String::from(".."),
                         r#type: String::from("directory"),
                         full_path: (join_path(&target_dir_path.to_string(), "..")),
                         ..Default::default()
-                    });
+                    };
+                    if _is_listing { populate_listing_info(&mut dotdot); }
+                    entries.push(dotdot);
                 }
 
                 if let Ok(read_dir) = fs::read_dir(&target_dir_path) {
@@ -311,7 +316,6 @@ pub fn collect_data(
         });
     }
 
-    println!("result {:#?}", results);
     Ok(results)
 }
 
@@ -351,27 +355,75 @@ fn get_classify_type(path: &str) -> CrateResult<String> {
 pub fn display_ls_result(
     _is_all: bool,
     is_classify: bool,
-    _is_listing: bool,
+    is_listing: bool,
     data: Vec<Directory>
 ) -> String {
     let mut result: String = String::new();
 
     for dir in data.iter() {
-  
-        let file_content = &dir.file_content;
+        let mut file_content = dir.file_content.clone();
+        file_content.sort_by(|a, b| a.name.cmp(&b.name));
 
-        if data.len()>1 {
+        if data.len() > 1 {
             result.push_str(&format!("{}:", &dir.name));
             result.push('\n');
         }
 
-        for (idx, file) in file_content.iter().enumerate(){
-            if idx != 0{
-                result.push_str("  ")
+        if is_listing {
+            // Compute column widths
+            let mut max_links = 0usize;
+            let mut max_user = 0usize;
+            let mut max_group = 0usize;
+            let mut max_size = 0usize;
+            for f in &file_content {
+                max_links = max_links.max(f.links.to_string().len());
+                max_user = max_user.max(f.user.len());
+                max_group = max_group.max(f.group.len());
+                max_size = max_size.max(f.size.to_string().len());
             }
-            result.push_str(&file.name);
-            if is_classify{
-                result.push_str(add_classify_syntax(&file.r#type));
+
+            for file in &file_content {
+                let perms = if let Some(p) = file.permissions.get(0) { p } else { "---------" };
+                let type_char = file_type_char(&file.r#type);
+                let mut name_segment = file.name.clone();
+                if is_classify {
+                    name_segment.push_str(add_classify_syntax(&file.r#type));
+                }
+                if file.r#type == "symlink" {
+                    if let Some(target) = &file.symlink_target {
+                        name_segment.push_str(" -> ");
+                        name_segment.push_str(target);
+                    }
+                }
+
+                result.push_str(&format!(
+                    "{}{} {:>links$} {:<userw$} {:<groupw$} {:>sizew$} {} {}\n",
+                    type_char,
+                    perms,
+                    file.links,
+                    file.user,
+                    file.group,
+                    file.size,
+                    file.modified_time,
+                    name_segment,
+                    links = max_links,
+                    userw = max_user,
+                    groupw = max_group,
+                    sizew = max_size,
+                ));
+            }
+        } else {
+            for (idx, file) in file_content.iter().enumerate() {
+                if idx != 0 {
+                    result.push_str("  ");
+                } 
+                result.push_str(&file.name);
+                if is_classify {
+                    result.push_str(add_classify_syntax(&file.r#type));
+                }
+                if idx == file_content.len() - 1 {
+                    result.push_str("\n");
+                }
             }
         }
     }
@@ -404,6 +456,9 @@ fn populate_listing_info(info: &mut FileInfo) {
     let mut group_string = String::new();
     let mut device_info: (usize, usize) = (0, 0);
     let mut symlink_target: Option<String> = None;
+    let mut links: u64 = 0;
+    let mut size: u64 = 0;
+    let mut modified_time = String::new();
 
     // Prefer symlink metadata to avoid following links when determining type/target
     let meta_symlink = std::fs::symlink_metadata(&info.full_path);
@@ -423,10 +478,16 @@ fn populate_listing_info(info: &mut FileInfo) {
             permission_bits = (mode & 0o777) as usize;
             permissions_string = build_unix_permission_string(mode);
 
-            user_string = md.uid().to_string();
-            group_string = md.gid().to_string();
+            user_string = resolve_unix_user(md.uid());
+            group_string = resolve_unix_group(md.gid());
 
             device_info = (md.dev() as usize, md.rdev() as usize);
+            links = md.nlink() as u64;
+            size = md.size();
+
+            if let Ok(sys_time) = md.modified() {
+                modified_time = format_time_unix(sys_time);
+            }
         }
 
         #[cfg(not(unix))]
@@ -437,6 +498,12 @@ fn populate_listing_info(info: &mut FileInfo) {
             user_string = String::new();
             group_string = String::new();
             device_info = (0, 0);
+            if let Ok(md2) = std::fs::metadata(&info.full_path) {
+                size = md2.len();
+                if let Ok(sys_time) = md2.modified() {
+                    modified_time = format_time_portable(sys_time);
+                }
+            }
         }
     }
 
@@ -450,6 +517,9 @@ fn populate_listing_info(info: &mut FileInfo) {
     info.group = group_string;
     info.device_info = device_info;
     info.symlink_target = symlink_target;
+    info.links = links;
+    info.size = size;
+    info.modified_time = modified_time;
 }
 
 #[cfg(unix)]
@@ -471,4 +541,54 @@ fn build_unix_permission_string(mode: u32) -> String {
     // Append a hint char to indicate directory for readability in long view builders (optional)
     let _ = file_type_char; // keep variable used in case of future expansion
     s
+}
+
+fn file_type_char(file_type: &str) -> char {
+    match file_type {
+        "directory" => 'd',
+        "symlink" => 'l',
+        _ => '-',
+    }
+}
+
+#[cfg(unix)]
+fn resolve_unix_user(uid: u32) -> String {
+    // Use libc + passwd to resolve UID to name
+    unsafe {
+        let pwd = libc::getpwuid(uid);
+        if pwd.is_null() { return uid.to_string(); }
+        let name_ptr = (*pwd).pw_name;
+        if name_ptr.is_null() { return uid.to_string(); }
+        let c_str = std::ffi::CStr::from_ptr(name_ptr);
+        c_str.to_string_lossy().into_owned()
+    }
+}
+
+#[cfg(unix)]
+fn resolve_unix_group(gid: u32) -> String {
+    unsafe {
+        let grp = libc::getgrgid(gid);
+        if grp.is_null() { return gid.to_string(); }
+        let name_ptr = (*grp).gr_name;
+        if name_ptr.is_null() { return gid.to_string(); }
+        let c_str = std::ffi::CStr::from_ptr(name_ptr);
+        c_str.to_string_lossy().into_owned()
+    }
+}
+
+#[cfg(unix)]
+fn format_time_unix(time: std::time::SystemTime) -> String {
+    use std::time::SystemTime;
+    use std::time::UNIX_EPOCH;
+    let ts = time.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+    // Simple ls-like time: yyyy-mm-dd HH:MM
+    let tm = chrono::NaiveDateTime::from_timestamp_opt(ts as i64, 0)
+        .unwrap_or_else(|| chrono::NaiveDateTime::from_timestamp_opt(0,0).unwrap());
+    tm.format("%Y-%m-%d %H:%M").to_string()
+}
+
+#[cfg(not(unix))]
+fn format_time_portable(time: std::time::SystemTime) -> String {
+    let datetime: chrono::DateTime<chrono::Local> = time.into();
+    datetime.format("%Y-%m-%d %H:%M").to_string()
 }
