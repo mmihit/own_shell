@@ -57,10 +57,8 @@ impl TryFrom<&str> for Command {
         match input_slice[0].to_lowercase().as_str() {
             "exit" => Ok(Self::Exit),
 
-            "pwd" => if input_slice.len() < 2 {
+            "pwd" => {
                 return Ok(Self::Pwd);
-            } else {
-                Err(anyhow!("too many arguments/options"))
             }
 
             "cd" => if input_slice.len() > 2 {
@@ -96,9 +94,9 @@ impl TryFrom<&str> for Command {
                     }
                 }
                 if result.dirs.len() == 0 {
-                    result.dirs.push(String::from("."))
+                    result.dirs.push(String::from("."));
                 }
-                return Ok(Self::Ls(result))
+                return Ok(Self::Ls(result));
             }
 
             "echo" => if input_slice.len() < 2 {

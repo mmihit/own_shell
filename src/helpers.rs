@@ -1,19 +1,15 @@
+use anyhow::{ anyhow };
 use tokio::io::{ self, AsyncBufReadExt, AsyncWriteExt, BufWriter, Stdout };
-// use std::collections::HashMap;
-// use std::fs::FileType;
 use std::fs;
 use std::path::{ Path };
-
 use crate::errors::CrateResult;
 
-// struct FileInfo {
-//     name: String,
-//     user: String,
-//     role: String,
-//     time: String,
-//     file_type: Option<FileType>,
-//     size: Option<u64>,
-// }
+#[derive(Debug, PartialEq)]
+enum QuoteStatus {
+    Balanced,
+    UnclosedSingle,
+    UnclosedDouble,
+}
 
 pub async fn handle_quotes(input: &str, stdout: &mut BufWriter<Stdout>) -> io::Result<String> {
     let mut final_input = input.to_string();
@@ -50,13 +46,6 @@ pub async fn handle_quotes(input: &str, stdout: &mut BufWriter<Stdout>) -> io::R
     }
 
     Ok(process_shell_quotes(&final_input.trim()))
-}
-
-#[derive(Debug, PartialEq)]
-enum QuoteStatus {
-    Balanced,
-    UnclosedSingle,
-    UnclosedDouble,
 }
 
 fn check_quotes(input: &str) -> QuoteStatus {
@@ -210,7 +199,7 @@ pub struct FileInfo {
     pub user: String,
     pub group: String,
     pub permission_bits: usize,
-    pub device_info: (usize,usize),
+    pub device_info: (usize, usize),
     pub symlink_target: Option<String>,
     pub links: u64,
     pub size: u64,
@@ -265,16 +254,20 @@ pub fn collect_data(
                         full_path: (&target_dir_path).to_string(),
                         ..Default::default()
                     };
-                    if _is_listing { populate_listing_info(&mut dot); }
+                    if _is_listing {
+                        populate_listing_info(&mut dot);
+                    }
                     entries.push(dot);
 
                     let mut dotdot = FileInfo {
                         name: String::from(".."),
                         r#type: String::from("directory"),
-                        full_path: (join_path(&target_dir_path.to_string(), "..")),
+                        full_path: join_path(&target_dir_path.to_string(), ".."),
                         ..Default::default()
                     };
-                    if _is_listing { populate_listing_info(&mut dotdot); }
+                    if _is_listing {
+                        populate_listing_info(&mut dotdot);
+                    }
                     entries.push(dotdot);
                 }
 
@@ -292,9 +285,9 @@ pub fn collect_data(
                             ).unwrap();
 
                             let mut info = FileInfo {
-                                name:(&name).to_string(),
+                                name: (&name).to_string(),
                                 r#type: file_type,
-                                full_path: (join_path(&target_dir_path.to_string(), &name)),
+                                full_path: join_path(&target_dir_path.to_string(), &name),
                                 ..Default::default()
                             };
                             if _is_listing {
@@ -305,9 +298,10 @@ pub fn collect_data(
                     }
                 }
             }
-            _ => {
-                // if path not exist (should handle it later)
+            Err(error) => {
+                return Err(anyhow!(error));
             }
+            _ => {}
         }
 
         results.push(Directory {
@@ -333,8 +327,6 @@ fn get_classify_type(path: &str) -> CrateResult<String> {
     } else if metadata.file_type().is_symlink() {
         Ok("symlink".to_string())
     } else if metadata.is_file() {
-        // Check if executable
-        #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             if (metadata.permissions().mode() & 0o111) != 0 {
@@ -342,10 +334,6 @@ fn get_classify_type(path: &str) -> CrateResult<String> {
             } else {
                 Ok("file".to_string())
             }
-        }
-        #[cfg(not(unix))]
-        {
-            Ok("file".to_string())
         }
     } else {
         Ok("other".to_string())
@@ -362,7 +350,22 @@ pub fn display_ls_result(
 
     for dir in data.iter() {
         let mut file_content = dir.file_content.clone();
-        file_content.sort_by(|a, b| a.name.cmp(&b.name));
+        file_content.sort_by(|a, b| {
+            match (a.name.starts_with('.'), b.name.starts_with('.')) {
+                // a عادي و b hidden → a يجي قبل
+                (false, true) => std::cmp::Ordering::Less,
+                // a hidden و b عادي → b يجي قبل
+                (true, false) => std::cmp::Ordering::Greater,
+                // بجوج عاديين → نقارنهم مباشرة
+                (false, false) => a.name.cmp(&b.name),
+                // بجوج hidden → نقارنهم بلا النقطة
+                (true, true) => {
+                    let a_key: String = a.name.chars().skip(1).collect();
+                    let b_key: String = b.name.chars().skip(1).collect();
+                    a_key.cmp(&b_key)
+                }
+            }
+        });
 
         if data.len() > 1 {
             result.push_str(&format!("{}:", &dir.name));
@@ -396,27 +399,29 @@ pub fn display_ls_result(
                     }
                 }
 
-                result.push_str(&format!(
-                    "{}{} {:>links$} {:<userw$} {:<groupw$} {:>sizew$} {} {}\n",
-                    type_char,
-                    perms,
-                    file.links,
-                    file.user,
-                    file.group,
-                    file.size,
-                    file.modified_time,
-                    name_segment,
-                    links = max_links,
-                    userw = max_user,
-                    groupw = max_group,
-                    sizew = max_size,
-                ));
+                result.push_str(
+                    &format!(
+                        "{}{} {:>links$} {:<userw$} {:<groupw$} {:>sizew$} {} {}\n",
+                        type_char,
+                        perms,
+                        file.links,
+                        file.user,
+                        file.group,
+                        file.size,
+                        file.modified_time,
+                        name_segment,
+                        links = max_links,
+                        userw = max_user,
+                        groupw = max_group,
+                        sizew = max_size
+                    )
+                );
             }
         } else {
             for (idx, file) in file_content.iter().enumerate() {
                 if idx != 0 {
                     result.push_str("  ");
-                } 
+                }
                 result.push_str(&file.name);
                 if is_classify {
                     result.push_str(add_classify_syntax(&file.r#type));
@@ -431,22 +436,15 @@ pub fn display_ls_result(
     result
 }
 
-pub fn pwd() -> String {
-    let cur_dir = std::env::current_dir().unwrap();
-    cur_dir.display().to_string()
-}
-
 fn add_classify_syntax<'a>(file_type: &'a str) -> &'a str {
     match file_type {
         "file" => "",
-        "directory"=>"/",
-        "executable"=>"*",
-        "symlink"=> "->",
-        _=>""
+        "directory" => "/",
+        "executable" => "*",
+        "symlink" => "->",
+        _ => "",
     }
-
 }
-// pub fn display_ls_result()
 
 fn populate_listing_info(info: &mut FileInfo) {
     // Default values
@@ -470,7 +468,6 @@ fn populate_listing_info(info: &mut FileInfo) {
             }
         }
 
-        #[cfg(unix)]
         {
             use std::os::unix::fs::MetadataExt;
 
@@ -487,22 +484,6 @@ fn populate_listing_info(info: &mut FileInfo) {
 
             if let Ok(sys_time) = md.modified() {
                 modified_time = format_time_unix(sys_time);
-            }
-        }
-
-        #[cfg(not(unix))]
-        {
-            // Basic cross-platform fallback
-            permission_bits = 0;
-            permissions_string = String::from("---------");
-            user_string = String::new();
-            group_string = String::new();
-            device_info = (0, 0);
-            if let Ok(md2) = std::fs::metadata(&info.full_path) {
-                size = md2.len();
-                if let Ok(sys_time) = md2.modified() {
-                    modified_time = format_time_portable(sys_time);
-                }
             }
         }
     }
@@ -524,8 +505,6 @@ fn populate_listing_info(info: &mut FileInfo) {
 
 #[cfg(unix)]
 fn build_unix_permission_string(mode: u32) -> String {
-    let file_type_char = if (mode & libc::S_IFMT) == libc::S_IFDIR { '/'} else { '-' };
-
     let mut s = String::new();
     // We won't prefix with file type like ls '-','d','l'; type indicator is handled elsewhere.
     let usr = ((mode >> 6) & 0o7) as u8;
@@ -533,13 +512,11 @@ fn build_unix_permission_string(mode: u32) -> String {
     let oth = (mode & 0o7) as u8;
 
     for bits in [usr, grp, oth] {
-        s.push(if bits & 0b100 != 0 { 'r' } else { '-' });
-        s.push(if bits & 0b010 != 0 { 'w' } else { '-' });
-        s.push(if bits & 0b001 != 0 { 'x' } else { '-' });
+        s.push(if (bits & 0b100) != 0 { 'r' } else { '-' });
+        s.push(if (bits & 0b010) != 0 { 'w' } else { '-' });
+        s.push(if (bits & 0b001) != 0 { 'x' } else { '-' });
     }
 
-    // Append a hint char to indicate directory for readability in long view builders (optional)
-    let _ = file_type_char; // keep variable used in case of future expansion
     s
 }
 
@@ -556,9 +533,13 @@ fn resolve_unix_user(uid: u32) -> String {
     // Use libc + passwd to resolve UID to name
     unsafe {
         let pwd = libc::getpwuid(uid);
-        if pwd.is_null() { return uid.to_string(); }
+        if pwd.is_null() {
+            return uid.to_string();
+        }
         let name_ptr = (*pwd).pw_name;
-        if name_ptr.is_null() { return uid.to_string(); }
+        if name_ptr.is_null() {
+            return uid.to_string();
+        }
         let c_str = std::ffi::CStr::from_ptr(name_ptr);
         c_str.to_string_lossy().into_owned()
     }
@@ -568,9 +549,13 @@ fn resolve_unix_user(uid: u32) -> String {
 fn resolve_unix_group(gid: u32) -> String {
     unsafe {
         let grp = libc::getgrgid(gid);
-        if grp.is_null() { return gid.to_string(); }
+        if grp.is_null() {
+            return gid.to_string();
+        }
         let name_ptr = (*grp).gr_name;
-        if name_ptr.is_null() { return gid.to_string(); }
+        if name_ptr.is_null() {
+            return gid.to_string();
+        }
         let c_str = std::ffi::CStr::from_ptr(name_ptr);
         c_str.to_string_lossy().into_owned()
     }
@@ -578,17 +563,16 @@ fn resolve_unix_group(gid: u32) -> String {
 
 #[cfg(unix)]
 fn format_time_unix(time: std::time::SystemTime) -> String {
-    use std::time::SystemTime;
     use std::time::UNIX_EPOCH;
     let ts = time.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
     // Simple ls-like time: yyyy-mm-dd HH:MM
-    let tm = chrono::NaiveDateTime::from_timestamp_opt(ts as i64, 0)
-        .unwrap_or_else(|| chrono::NaiveDateTime::from_timestamp_opt(0,0).unwrap());
+    let tm = chrono::DateTime
+        ::from_timestamp(ts as i64, 0)
+        .unwrap_or_else(|| chrono::DateTime::from_timestamp(0, 0).unwrap());
     tm.format("%Y-%m-%d %H:%M").to_string()
 }
 
-#[cfg(not(unix))]
-fn format_time_portable(time: std::time::SystemTime) -> String {
-    let datetime: chrono::DateTime<chrono::Local> = time.into();
-    datetime.format("%Y-%m-%d %H:%M").to_string()
+pub fn pwd() -> String {
+    let cur_dir = std::env::current_dir().unwrap();
+    cur_dir.display().to_string()
 }

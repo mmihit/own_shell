@@ -186,7 +186,7 @@ impl Executor {
                 }
             }
         }
-        Ok(String::from("done\n"))
+        Ok(String::new())
     }
 
     async fn mv(&self, paths: &Vec<String>) -> CrateResult<String> {

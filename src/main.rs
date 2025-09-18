@@ -60,7 +60,7 @@ fn spawn_user_input_handle() -> JoinHandle<CrateResult<()>> {
         if is_ctrl_d {
             stdout.write(b"\n").await?;
         }
-        stdout.write(b"Exiting...\n").await?;
+
         stdout.flush().await?;
         Ok(())
     })
