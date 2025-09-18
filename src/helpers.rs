@@ -504,6 +504,15 @@ fn populate_listing_info(info: &mut FileInfo) {
     }
 
     info.permission_bits = permission_bits;
+    
+    // Add extended attributes indicator if present
+    #[cfg(unix)]
+    {
+        if has_extended_attributes(&info.full_path) {
+            permissions_string.push('+');
+        }
+    }
+    
     info.permissions = if permissions_string.is_empty() {
         Vec::new()
     } else {
@@ -520,19 +529,51 @@ fn populate_listing_info(info: &mut FileInfo) {
 
 #[cfg(unix)]
 fn build_unix_permission_string(mode: u32) -> String {
-    let mut s = String::new();
-    // We won't prefix with file type like ls '-','d','l'; type indicator is handled elsewhere.
-    let usr = ((mode >> 6) & 0o7) as u8;
-    let grp = ((mode >> 3) & 0o7) as u8;
-    let oth = (mode & 0o7) as u8;
+    let mut perm_str = String::with_capacity(10);
 
-    for bits in [usr, grp, oth] {
-        s.push(if (bits & 0b100) != 0 { 'r' } else { '-' });
-        s.push(if (bits & 0b010) != 0 { 'w' } else { '-' });
-        s.push(if (bits & 0b001) != 0 { 'x' } else { '-' });
+    let owner = (mode & 0o700) >> 6;
+    let group = (mode & 0o070) >> 3;
+    let others = mode & 0o007;
+
+    // Owner permissions
+    perm_str.push(if owner & 0o4 != 0 { 'r' } else { '-' });
+    perm_str.push(if owner & 0o2 != 0 { 'w' } else { '-' });
+    if mode & 0o4000 != 0 {
+        perm_str.push(if owner & 0o1 != 0 { 's' } else { 'S' });
+    } else {
+        perm_str.push(if owner & 0o1 != 0 { 'x' } else { '-' });
     }
 
-    s
+    // Group permissions
+    perm_str.push(if group & 0o4 != 0 { 'r' } else { '-' });
+    perm_str.push(if group & 0o2 != 0 { 'w' } else { '-' });
+    if mode & 0o2000 != 0 {
+        perm_str.push(if group & 0o1 != 0 { 's' } else { 'S' });
+    } else {
+        perm_str.push(if group & 0o1 != 0 { 'x' } else { '-' });
+    }
+
+    // Others permissions
+    perm_str.push(if others & 0o4 != 0 { 'r' } else { '-' });
+    perm_str.push(if others & 0o2 != 0 { 'w' } else { '-' });
+    if mode & 0o1000 != 0 {
+        perm_str.push(if others & 0o1 != 0 { 't' } else { 'T' });
+    } else {
+        perm_str.push(if others & 0o1 != 0 { 'x' } else { '-' });
+    }
+
+    perm_str
+}
+
+#[cfg(unix)]
+fn has_extended_attributes(path: &str) -> bool {
+    unsafe {
+        libc::listxattr(
+            path.as_ptr() as *const _,
+            std::ptr::null_mut(),
+            0,
+        ) > 0
+    }
 }
 
 fn file_type_char(file_type: &str) -> char {
@@ -578,13 +619,17 @@ fn resolve_unix_group(gid: u32) -> String {
 
 #[cfg(unix)]
 fn format_time_unix(time: std::time::SystemTime) -> String {
-    use std::time::UNIX_EPOCH;
-    let ts = time.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
-    // Simple ls-like time: yyyy-mm-dd HH:MM
-    let tm = chrono::DateTime
-        ::from_timestamp(ts as i64, 0)
-        .unwrap_or_else(|| chrono::DateTime::from_timestamp(0, 0).unwrap());
-    tm.format("%Y-%m-%d %H:%M").to_string()
+    use chrono::{DateTime, Local};
+    
+    let datetime: DateTime<Local> = time.into();
+    
+    let mut formatted_time = datetime.format("%b %e %H:%M").to_string();
+    let current_year = Local::now().year();
+    let its_year = datetime.year();
+    if current_year != its_year {
+        formatted_time = datetime.format("%b %e  %Y").to_string();
+    }
+    formatted_time
 }
 
 pub fn pwd() -> String {
