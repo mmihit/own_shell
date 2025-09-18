@@ -3,6 +3,7 @@ use tokio::io::{ self, AsyncBufReadExt, AsyncWriteExt, BufWriter, Stdout };
 use std::fs;
 use std::path::{ Path };
 use crate::errors::CrateResult;
+use chrono::Datelike;
 
 #[derive(Debug, PartialEq)]
 enum QuoteStatus {
@@ -351,18 +352,22 @@ pub fn display_ls_result(
     for dir in data.iter() {
         let mut file_content = dir.file_content.clone();
         file_content.sort_by(|a, b| {
-            match (a.name.starts_with('.'), b.name.starts_with('.')) {
-                // a عادي و b hidden → a يجي قبل
-                (false, true) => std::cmp::Ordering::Less,
-                // a hidden و b عادي → b يجي قبل
-                (true, false) => std::cmp::Ordering::Greater,
-                // بجوج عاديين → نقارنهم مباشرة
-                (false, false) => a.name.cmp(&b.name),
-                // بجوج hidden → نقارنهم بلا النقطة
-                (true, true) => {
-                    let a_key: String = a.name.chars().skip(1).collect();
-                    let b_key: String = b.name.chars().skip(1).collect();
-                    a_key.cmp(&b_key)
+            // Special handling for . and .. entries
+            match (&a.name[..], &b.name[..]) {
+                (".", _) => std::cmp::Ordering::Less,
+                (_, ".") => std::cmp::Ordering::Greater,
+                ("..", _) if b.name != "." => std::cmp::Ordering::Less,
+                (_, "..") if a.name != "." => std::cmp::Ordering::Greater,
+                _ => {
+                    // For all other entries, sort by type then alphabetically
+                    let type_cmp = a.r#type.cmp(&b.r#type);
+                    if type_cmp != std::cmp::Ordering::Equal {
+                        // Reverse so directories come first
+                        type_cmp.reverse()
+                    } else {
+                        // Then sort alphabetically (case-insensitive)
+                        a.name.to_lowercase().cmp(&b.name.to_lowercase())
+                    }
                 }
             }
         });
@@ -619,9 +624,14 @@ fn resolve_unix_group(gid: u32) -> String {
 
 #[cfg(unix)]
 fn format_time_unix(time: std::time::SystemTime) -> String {
-    use chrono::{DateTime, Datelike, Local};
+    use chrono::{DateTime, Local, TimeZone};
+    use chrono_tz::Tz;
     
-    let datetime: DateTime<Local> = time.into();
+        let name = iana_time_zone::get_timezone().unwrap_or("UTC".to_string());
+    let tz = name.parse::<chrono_tz::Tz>().unwrap_or(Tz::UTC);
+    let last_mod_time = time;
+    let datetime: DateTime<Local> = last_mod_time.into();
+    let datetime = datetime.with_timezone(&tz);
     
     let mut formatted_time = datetime.format("%b %e %H:%M").to_string();
     let current_year = Local::now().year();
