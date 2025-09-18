@@ -104,3 +104,69 @@ group: Option<String>
 mode: Option<u32>
 device_info: Option<(u32, u32)>
 symlink_target: Option<String>
+
+
+
+
+pub fn get_time(metadata: &Metadata) -> String {
+    let name = iana_time_zone::get_timezone().unwrap_or("UTC".to_string());
+    let tz = name.parse::<chrono_tz::Tz>().unwrap_or(Tz::UTC);
+    let last_mod_time = metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH);
+    let datetime: DateTime<Local> = last_mod_time.into();
+    let datetime = datetime.with_timezone(&tz);
+
+    let mut formatted_time = datetime.format("%b %e %H:%M").to_string();
+    let current_year = Local::now().year();
+    let its_year = datetime.year();
+    if current_year != its_year {
+        formatted_time = datetime.format("%b %e  %Y").to_string();
+    };
+    formatted_time
+}
+
+pub fn format_permissions(permissions: &Permissions, path: &Path) -> String {
+    let mode = permissions.mode();
+    let owner = (mode & 0o700) >> 6;
+    let group = (mode & 0o070) >> 3;
+    let others = mode & 0o007;
+
+    let mut perm_str = String::with_capacity(10);
+
+    perm_str.push(if owner & 0o4 != 0 { 'r' } else { '-' });
+    perm_str.push(if owner & 0o2 != 0 { 'w' } else { '-' });
+    if mode & 0o4000 != 0 {
+        perm_str.push(if owner & 0o1 != 0 { 's' } else { 'S' });
+    } else {
+        perm_str.push(if owner & 0o1 != 0 { 'x' } else { '-' });
+    }
+
+    perm_str.push(if group & 0o4 != 0 { 'r' } else { '-' });
+    perm_str.push(if group & 0o2 != 0 { 'w' } else { '-' });
+    if mode & 0o2000 != 0 {
+        perm_str.push(if group & 0o1 != 0 { 's' } else { 'S' });
+    } else {
+        perm_str.push(if group & 0o1 != 0 { 'x' } else { '-' });
+    }
+
+    perm_str.push(if others & 0o4 != 0 { 'r' } else { '-' });
+    perm_str.push(if others & 0o2 != 0 { 'w' } else { '-' });
+    if mode & 0o1000 != 0 {
+        perm_str.push(if others & 0o1 != 0 { 't' } else { 'T' });
+    } else {
+        perm_str.push(if others & 0o1 != 0 { 'x' } else { '-' });
+    }
+
+    // Basic extended attribute check (fallback)
+    let attr_len = unsafe {
+        libc::listxattr(
+            path.to_str().unwrap_or("").as_ptr() as *const _,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if attr_len > 0 {
+        perm_str.push('+');
+    }
+
+    perm_str
+}

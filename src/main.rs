@@ -1,3 +1,4 @@
+use anyhow::Result;
 use tokio::io::{ self, AsyncBufReadExt, AsyncWriteExt};
 use tokio::task::JoinHandle;
 
@@ -66,11 +67,7 @@ fn spawn_user_input_handle() -> JoinHandle<CrateResult<()>> {
     })
 }
 
-
 #[tokio::main]
-async fn main() {
-    let input_handler = spawn_user_input_handle().await;
-    if let Ok(Err(e)) = input_handler {
-        println!("Error: {}", e)
-    }
+async fn main() -> Result<(), anyhow::Error> {
+    spawn_user_input_handle().await?
 }
