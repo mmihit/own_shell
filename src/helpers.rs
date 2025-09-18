@@ -624,7 +624,7 @@ fn resolve_unix_group(gid: u32) -> String {
 
 #[cfg(unix)]
 fn format_time_unix(time: std::time::SystemTime) -> String {
-    use chrono::{DateTime, Local, TimeZone};
+    use chrono::{DateTime, Local};
     use chrono_tz::Tz;
     
         let name = iana_time_zone::get_timezone().unwrap_or("UTC".to_string());

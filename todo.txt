@@ -1,7 +1,0 @@
-panick when cargo r | echo "\n"
-
-ls permisions + s t
-
-the time_format
-
-the display (optional)
