@@ -619,7 +619,7 @@ fn resolve_unix_group(gid: u32) -> String {
 
 #[cfg(unix)]
 fn format_time_unix(time: std::time::SystemTime) -> String {
-    use chrono::{DateTime, Local};
+    use chrono::{DateTime, Datelike, Local};
     
     let datetime: DateTime<Local> = time.into();
     
