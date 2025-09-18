@@ -245,12 +245,16 @@ pub fn collect_data(
                     .and_then(|s| s.to_str())
                     .unwrap_or(&dir)
                     .to_string();
-                entries.push(FileInfo {
+                let mut info = FileInfo {
                     name,
                     r#type: String::from("file"),
                     full_path: (&target_dir_path).to_string(),
                     ..Default::default()
-                });
+                };
+                if _is_listing {
+                    populate_listing_info(&mut info);
+                }
+                entries.push(info);
             }
             Ok(md) if md.is_dir() => {
                 // When listing a specific directory (not "."), include '.' and '..' entries first
@@ -282,12 +286,16 @@ pub fn collect_data(
                                 &join_path(&target_dir_path, &name)
                             ).unwrap();
 
-                            entries.push(FileInfo {
+                            let mut info = FileInfo {
                                 name:(&name).to_string(),
                                 r#type: file_type,
                                 full_path: (join_path(&target_dir_path.to_string(), &name)),
                                 ..Default::default()
-                            });
+                            };
+                            if _is_listing {
+                                populate_listing_info(&mut info);
+                            }
+                            entries.push(info);
                         }
                     }
                 }
@@ -303,6 +311,7 @@ pub fn collect_data(
         });
     }
 
+    println!("result {:#?}", results);
     Ok(results)
 }
 
@@ -340,9 +349,9 @@ fn get_classify_type(path: &str) -> CrateResult<String> {
 }
 
 pub fn display_ls_result(
-    is_all: bool,
+    _is_all: bool,
     is_classify: bool,
-    is_listing: bool,
+    _is_listing: bool,
     data: Vec<Directory>
 ) -> String {
     let mut result: String = String::new();
@@ -386,3 +395,80 @@ fn add_classify_syntax<'a>(file_type: &'a str) -> &'a str {
 
 }
 // pub fn display_ls_result()
+
+fn populate_listing_info(info: &mut FileInfo) {
+    // Default values
+    let mut permissions_string = String::new();
+    let mut permission_bits: usize = 0;
+    let mut user_string = String::new();
+    let mut group_string = String::new();
+    let mut device_info: (usize, usize) = (0, 0);
+    let mut symlink_target: Option<String> = None;
+
+    // Prefer symlink metadata to avoid following links when determining type/target
+    let meta_symlink = std::fs::symlink_metadata(&info.full_path);
+    if let Ok(md) = meta_symlink {
+        // Symlink target
+        if md.file_type().is_symlink() {
+            if let Ok(target) = std::fs::read_link(&info.full_path) {
+                symlink_target = Some(target.to_string_lossy().to_string());
+            }
+        }
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+
+            let mode = md.mode();
+            permission_bits = (mode & 0o777) as usize;
+            permissions_string = build_unix_permission_string(mode);
+
+            user_string = md.uid().to_string();
+            group_string = md.gid().to_string();
+
+            device_info = (md.dev() as usize, md.rdev() as usize);
+        }
+
+        #[cfg(not(unix))]
+        {
+            // Basic cross-platform fallback
+            permission_bits = 0;
+            permissions_string = String::from("---------");
+            user_string = String::new();
+            group_string = String::new();
+            device_info = (0, 0);
+        }
+    }
+
+    info.permission_bits = permission_bits;
+    info.permissions = if permissions_string.is_empty() {
+        Vec::new()
+    } else {
+        vec![permissions_string]
+    };
+    info.user = user_string;
+    info.group = group_string;
+    info.device_info = device_info;
+    info.symlink_target = symlink_target;
+}
+
+#[cfg(unix)]
+fn build_unix_permission_string(mode: u32) -> String {
+    let file_type_char = if (mode & libc::S_IFMT) == libc::S_IFDIR { '/'} else { '-' };
+
+    let mut s = String::new();
+    // We won't prefix with file type like ls '-','d','l'; type indicator is handled elsewhere.
+    let usr = ((mode >> 6) & 0o7) as u8;
+    let grp = ((mode >> 3) & 0o7) as u8;
+    let oth = (mode & 0o7) as u8;
+
+    for bits in [usr, grp, oth] {
+        s.push(if bits & 0b100 != 0 { 'r' } else { '-' });
+        s.push(if bits & 0b010 != 0 { 'w' } else { '-' });
+        s.push(if bits & 0b001 != 0 { 'x' } else { '-' });
+    }
+
+    // Append a hint char to indicate directory for readability in long view builders (optional)
+    let _ = file_type_char; // keep variable used in case of future expansion
+    s
+}
