@@ -385,6 +385,21 @@ pub fn display_ls_result(
                 max_size = max_size.max(f.size.to_string().len());
             }
 
+            let total_kblocks: u64 = {
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::MetadataExt;
+                    let mut blocks_512: u64 = 0;
+                    for f in &file_content {
+                        if let Ok(md) = std::fs::symlink_metadata(&f.full_path) {
+                            blocks_512 += md.blocks();
+                        }
+                    }
+                    (blocks_512.saturating_mul(512) + 1023) / 1024
+                }
+            };
+            result.push_str(&format!("total {}\n", total_kblocks));
+
             for file in &file_content {
                 let perms = if let Some(p) = file.permissions.get(0) { p } else { "---------" };
                 let type_char = file_type_char(&file.r#type);
