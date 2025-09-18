@@ -54,6 +54,7 @@ ls -a:
         file_content: [
             FileInfo{
                 name: ".",
+                type:""
             },
             FileInfo{
                 name: "..",
@@ -94,3 +95,12 @@ ls -l:
         ]
     }
 ]
+
+
+
+links: Option<u64>
+owner: Option<String>
+group: Option<String>
+mode: Option<u32>
+device_info: Option<(u32, u32)>
+symlink_target: Option<String>

@@ -1,17 +1,19 @@
 use tokio::io::{ self, AsyncBufReadExt, AsyncWriteExt, BufWriter, Stdout };
-use std::collections::HashMap;
-use std::fs::FileType;
+// use std::collections::HashMap;
+// use std::fs::FileType;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{ Path };
 
-struct file_info {
-    name:String,
-    user:String,
-    role:String,
-    time: String,
-    file_type: Option<FileType>,
-    size: Option<u64>,
-}
+use crate::errors::CrateResult;
+
+// struct FileInfo {
+//     name: String,
+//     user: String,
+//     role: String,
+//     time: String,
+//     file_type: Option<FileType>,
+//     size: Option<u64>,
+// }
 
 pub async fn handle_quotes(input: &str, stdout: &mut BufWriter<Stdout>) -> io::Result<String> {
     let mut final_input = input.to_string();
@@ -70,7 +72,7 @@ fn check_quotes(input: &str) -> QuoteStatus {
                 }
             }
             '"' => {
-                if !is_escaped(&chars, i) && single_quote_count ==0 {
+                if !is_escaped(&chars, i) && single_quote_count == 0 {
                     double_quote_count += 1;
                 }
             }
@@ -109,20 +111,20 @@ fn process_shell_quotes(input: &str) -> String {
     if input.is_empty() {
         return input.to_string();
     }
-    
+
     let chars: Vec<char> = input.chars().collect();
     let mut result = String::new();
     let mut i = 0;
-    
+
     while i < chars.len() {
         let ch = chars[i];
-        
+
         match ch {
             '"' => {
                 // Find the closing double quote
                 if let Some(closing_pos) = find_closing_quote(&chars, i, '"') {
                     // Add content between quotes (without the quotes)
-                    for j in (i + 1)..closing_pos {
+                    for j in i + 1..closing_pos {
                         result.push(chars[j]);
                     }
                     i = closing_pos + 1; // Skip past closing quote
@@ -131,12 +133,12 @@ fn process_shell_quotes(input: &str) -> String {
                     result.push(ch);
                     i += 1;
                 }
-            },
+            }
             '\'' => {
                 // Find the closing single quote
                 if let Some(closing_pos) = find_closing_quote(&chars, i, '\'') {
                     // Add content between quotes (without the quotes)
-                    for j in (i + 1)..closing_pos {
+                    for j in i + 1..closing_pos {
                         result.push(chars[j]);
                     }
                     i = closing_pos + 1; // Skip past closing quote
@@ -145,7 +147,7 @@ fn process_shell_quotes(input: &str) -> String {
                     result.push(ch);
                     i += 1;
                 }
-            },
+            }
             '\\' => {
                 // Handle escaped characters
                 if i + 1 < chars.len() {
@@ -155,7 +157,7 @@ fn process_shell_quotes(input: &str) -> String {
                             // Remove the backslash, keep the escaped character
                             result.push(next_char);
                             i += 2;
-                        },
+                        }
                         _ => {
                             // Keep the backslash for other characters
                             result.push(ch);
@@ -166,25 +168,26 @@ fn process_shell_quotes(input: &str) -> String {
                     result.push(ch);
                     i += 1;
                 }
-            },
-            ' '=> {
-                // Preserve spaces so tokens remain separated (e.g., "ls folder1 folder2")
-                result.push(ch);
-                i+=1
-            },
+            }
+            ' ' => {
+                if i > 0 && chars[i - 1] != ' ' {
+                    result.push(ch);
+                }
+                i += 1;
+            }
             _ => {
                 result.push(ch);
                 i += 1;
             }
         }
     }
-    
+
     result
 }
 
 fn find_closing_quote(chars: &[char], start: usize, quote_char: char) -> Option<usize> {
     let mut i = start + 1;
-    
+
     while i < chars.len() {
         if chars[i] == quote_char {
             // Check if it's escaped
@@ -194,20 +197,21 @@ fn find_closing_quote(chars: &[char], start: usize, quote_char: char) -> Option<
         }
         i += 1;
     }
-    
+
     None // No closing quote found
 }
 
-
-
-
-
-
-
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct FileInfo {
     pub name: String,
-    pub r#type: String,  // check if it is a folder or a file
+    pub r#type: String,
+    pub full_path: String,
+    pub permissions: Vec<String>,
+    pub user: String,
+    pub group: String,
+    pub permission_bits: usize,
+    pub device_info: (usize,usize),
+    pub symlink_target: Option<String>
 }
 
 #[derive(Debug, Clone)]
@@ -216,81 +220,77 @@ pub struct Directory {
     pub file_content: Vec<FileInfo>,
 }
 
-pub fn collect_data(is_all: bool, is_classify: bool, _is_listing: bool, dirs: Vec<String>) -> Vec<Directory> {
+pub fn collect_data(
+    is_all: bool,
+    _is_classify: bool,
+    _is_listing: bool,
+    dirs: Vec<String>
+) -> CrateResult<Vec<Directory>> {
     let mut results: Vec<Directory> = Vec::new();
-    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
 
-    let effective_dirs = if dirs.is_empty() { vec![String::from(".")] } else { dirs };
-
-    for dir in effective_dirs {
-        let display_name = dir.clone();
-        let full_path = if Path::new(&dir).is_absolute() {
-            PathBuf::from(&dir)
-        } else {
-            cwd.join(&dir)
-        };
+    for dir in dirs {
+        let display_name = &dir;
+        let current_path = pwd();
+        let target_dir_path = join_path(&current_path, &dir);
 
         let mut entries: Vec<FileInfo> = Vec::new();
 
-        match fs::metadata(&full_path) {
+        println!("full path: {}", target_dir_path);
+        println!("{:?}", fs::metadata(&target_dir_path).unwrap().file_type());
+
+        match fs::metadata(&target_dir_path) {
             Ok(md) if md.is_file() => {
                 let name = Path::new(&dir)
                     .file_name()
                     .and_then(|s| s.to_str())
                     .unwrap_or(&dir)
                     .to_string();
-                entries.push(FileInfo { 
-                    name, 
-                    r#type: String::from("file") 
+                entries.push(FileInfo {
+                    name,
+                    r#type: String::from("file"),
+                    full_path: (&target_dir_path).to_string(),
+                    ..Default::default()
                 });
             }
             Ok(md) if md.is_dir() => {
                 // When listing a specific directory (not "."), include '.' and '..' entries first
-                if display_name != "." {
-                    entries.push(FileInfo { name: String::from(".") , r#type: String::from("folder")});
-                    entries.push(FileInfo { name: String::from(".."), r#type: String::from("folder")});
+                if is_all {
+                    entries.push(FileInfo {
+                        name: String::from("."),
+                        r#type: String::from("directory"),
+                        full_path: (&target_dir_path).to_string(),
+                        ..Default::default()
+                    });
+                    entries.push(FileInfo {
+                        name: String::from(".."),
+                        r#type: String::from("directory"),
+                        full_path: (join_path(&target_dir_path.to_string(), "..")),
+                        ..Default::default()
+                    });
                 }
 
-                if let Ok(read_dir) = fs::read_dir(&full_path) {
+                if let Ok(read_dir) = fs::read_dir(&target_dir_path) {
                     for ent_res in read_dir {
                         if let Ok(ent) = ent_res {
-                            let file_name = ent.file_name().to_string_lossy().to_string();
+                            let name = ent.file_name().to_string_lossy().to_string();
 
-                            if !is_all && file_name.starts_with('.') {
+                            if !is_all && name.to_string().starts_with('.') {
                                 continue;
                             }
 
-                            let mut name = file_name.clone();
-                            let file_type = if let Ok(em) = ent.metadata() {
-                                if em.is_dir() {
-                                    if is_classify {
-                                        name.push('/');
-                                    }
-                                    String::from("folder")
-                                } else {
-                                    String::from("file")
-                                }
-                            } else {
-                                String::from("file")
-                            };
+                            let file_type = get_classify_type(
+                                &join_path(&target_dir_path, &name)
+                            ).unwrap();
 
-                            entries.push(FileInfo { 
-                                name, 
-                                r#type: file_type 
+                            entries.push(FileInfo {
+                                name:(&name).to_string(),
+                                r#type: file_type,
+                                full_path: (join_path(&target_dir_path.to_string(), &name)),
+                                ..Default::default()
                             });
                         }
                     }
                 }
-                // Keep '.' and '..' at the top (if present), then sort the rest
-                let mut dot_entries: Vec<FileInfo> = Vec::new();
-                let mut other_entries: Vec<FileInfo> = Vec::new();
-                for e in entries.into_iter() {
-                    if e.name == "." || e.name == ".." { dot_entries.push(e); } else { other_entries.push(e); }
-                }
-                other_entries.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
-                let mut combined = dot_entries;
-                combined.extend(other_entries);
-                entries = combined;
             }
             _ => {
                 // if path not exist (should handle it later)
@@ -298,10 +298,91 @@ pub fn collect_data(is_all: bool, is_classify: bool, _is_listing: bool, dirs: Ve
         }
 
         results.push(Directory {
-            name: display_name,
+            name: display_name.to_string(),
             file_content: entries,
         });
     }
 
-    results
+    Ok(results)
 }
+
+fn join_path(absolute_path: &str, subfolder: &str) -> String {
+    let base_path = Path::new(absolute_path);
+    let joined_path = base_path.join(subfolder);
+    joined_path.to_string_lossy().to_string()
+}
+
+fn get_classify_type(path: &str) -> CrateResult<String> {
+    let metadata = std::fs::symlink_metadata(path)?;
+
+    if metadata.is_dir() {
+        Ok("directory".to_string())
+    } else if metadata.file_type().is_symlink() {
+        Ok("symlink".to_string())
+    } else if metadata.is_file() {
+        // Check if executable
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if (metadata.permissions().mode() & 0o111) != 0 {
+                Ok("executable".to_string())
+            } else {
+                Ok("file".to_string())
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            Ok("file".to_string())
+        }
+    } else {
+        Ok("other".to_string())
+    }
+}
+
+pub fn display_ls_result(
+    is_all: bool,
+    is_classify: bool,
+    is_listing: bool,
+    data: Vec<Directory>
+) -> String {
+    let mut result: String = String::new();
+
+    for dir in data.iter() {
+  
+        let file_content = &dir.file_content;
+
+        if data.len()>1 {
+            result.push_str(&format!("{}:", &dir.name));
+            result.push('\n');
+        }
+
+        for (idx, file) in file_content.iter().enumerate(){
+            if idx != 0{
+                result.push_str("  ")
+            }
+            result.push_str(&file.name);
+            if is_classify{
+                result.push_str(add_classify_syntax(&file.r#type));
+            }
+        }
+    }
+
+    result
+}
+
+pub fn pwd() -> String {
+    let cur_dir = std::env::current_dir().unwrap();
+    cur_dir.display().to_string()
+}
+
+fn add_classify_syntax<'a>(file_type: &'a str) -> &'a str {
+    match file_type {
+        "file" => "",
+        "directory"=>"/",
+        "executable"=>"*",
+        "symlink"=> "->",
+        _=>""
+    }
+
+}
+// pub fn display_ls_result()

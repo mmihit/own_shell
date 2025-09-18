@@ -3,8 +3,9 @@ use crate::errors::CrateResult;
 use anyhow::{ anyhow, Ok };
 use std::result::Result::Ok as ResultOk;
 use std::{ path::Path, result };
-use crate::helpers::collect_data;
+use crate::helpers::{collect_data, pwd, display_ls_result};
 use tokio::fs::{ self, create_dir_all, read_to_string, remove_dir_all, remove_file };
+// use crathelpers::pwd;
 
 pub struct Executor {
     pub current_dir: String,
@@ -378,9 +379,13 @@ impl Executor {
     }
 
     async fn ls(&self, ls: &crate::command::Ls) -> CrateResult<String> {
-        let directories = collect_data(ls.is_all, ls.is_classify, ls.is_listing, ls.dirs.clone());
+        // let directories = collect_data(ls.is_all, ls.is_classify, ls.is_listing, ls.dirs.clone());
+        match collect_data(ls.is_all, ls.is_classify, ls.is_listing, ls.dirs.clone()) {
+            anyhow::Result::Ok(data) => {println!("{}",display_ls_result(ls.is_all, ls.is_classify, ls.is_listing, data))},
+            Err(_) => {}
+        }
         
-        println!("{:#?}", directories);
+        // println!("{:#?}", directories);
         let mut result = String::new();
 
         for dir in &ls.dirs {
@@ -461,7 +466,4 @@ impl Executor {
     }
 }
 
-fn pwd() -> String {
-    let cur_dir = std::env::current_dir().unwrap();
-    cur_dir.display().to_string()
-}
+
