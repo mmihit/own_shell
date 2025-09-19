@@ -33,8 +33,8 @@ fn spawn_user_input_handle() -> JoinHandle<CrateResult<()>> {
                     continue;
                 }
             };
-            match complete_input.as_str() {
-                "" => (),
+            match complete_input {
+                v if v.len() == 0 => (),
                 processed_input =>
                     match Command::try_from(processed_input) {
                         Ok(command) =>

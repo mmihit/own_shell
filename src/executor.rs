@@ -5,7 +5,6 @@ use std::result::Result::Ok as ResultOk;
 use std::{ path::Path, result };
 use crate::helpers::{collect_data, pwd, display_ls_result};
 use tokio::fs::{ self, create_dir_all, read_to_string, remove_dir_all, remove_file };
-// use crathelpers::pwd;
 
 pub struct Executor {
     pub current_dir: String,

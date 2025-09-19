@@ -4,6 +4,7 @@ use std::fs;
 use std::path::{ Path };
 use crate::errors::CrateResult;
 use chrono::Datelike;
+use std::os::unix::fs::MetadataExt;
 
 #[derive(Debug, PartialEq)]
 enum QuoteStatus {
@@ -12,7 +13,7 @@ enum QuoteStatus {
     UnclosedDouble,
 }
 
-pub async fn handle_quotes(input: &str, stdout: &mut BufWriter<Stdout>) -> io::Result<String> {
+pub async fn handle_quotes(input: &str, stdout: &mut BufWriter<Stdout>) -> io::Result<Vec<String>> {
     let mut final_input = input.to_string();
 
     loop {
@@ -23,7 +24,6 @@ pub async fn handle_quotes(input: &str, stdout: &mut BufWriter<Stdout>) -> io::R
                 break;
             }
             QuoteStatus::UnclosedSingle | QuoteStatus::UnclosedDouble => {
-                // flag=true;
                 stdout.write_all(b"> ").await?;
                 stdout.flush().await?;
 
@@ -46,7 +46,7 @@ pub async fn handle_quotes(input: &str, stdout: &mut BufWriter<Stdout>) -> io::R
         }
     }
 
-    Ok(process_shell_quotes(&final_input.trim()))
+    Ok(process_shell_quotes(&final_input))
 }
 
 fn check_quotes(input: &str) -> QuoteStatus {
@@ -97,13 +97,14 @@ fn is_escaped(chars: &[char], position: usize) -> bool {
     escape_count % 2 != 0
 }
 
-fn process_shell_quotes(input: &str) -> String {
+fn process_shell_quotes(input: &str) -> Vec<String> {
     if input.is_empty() {
-        return input.to_string();
+        return vec![];
     }
 
     let chars: Vec<char> = input.chars().collect();
-    let mut result = String::new();
+    let mut result = Vec::new();
+    let mut current_token = String::new();
     let mut i = 0;
 
     while i < chars.len() {
@@ -113,28 +114,28 @@ fn process_shell_quotes(input: &str) -> String {
             '"' => {
                 // Find the closing double quote
                 if let Some(closing_pos) = find_closing_quote(&chars, i, '"') {
-                    // Add content between quotes (without the quotes)
+                    // Add content between quotes (preserving spaces)
                     for j in i + 1..closing_pos {
-                        result.push(chars[j]);
+                        current_token.push(chars[j]);
                     }
-                    i = closing_pos + 1; // Skip past closing quote
+                    i = closing_pos + 1;
                 } else {
-                    // No closing quote found, treat as literal
-                    result.push(ch);
+                    // No closing quote, treat as literal
+                    current_token.push(ch);
                     i += 1;
                 }
             }
             '\'' => {
                 // Find the closing single quote
                 if let Some(closing_pos) = find_closing_quote(&chars, i, '\'') {
-                    // Add content between quotes (without the quotes)
+                    // Add content between quotes (preserving spaces)
                     for j in i + 1..closing_pos {
-                        result.push(chars[j]);
+                        current_token.push(chars[j]);
                     }
-                    i = closing_pos + 1; // Skip past closing quote
+                    i = closing_pos + 1;
                 } else {
-                    // No closing quote found, treat as literal
-                    result.push(ch);
+                    // No closing quote, treat as literal
+                    current_token.push(ch);
                     i += 1;
                 }
             }
@@ -144,32 +145,41 @@ fn process_shell_quotes(input: &str) -> String {
                     let next_char = chars[i + 1];
                     match next_char {
                         '"' | '\'' | '\\' => {
-                            // Remove the backslash, keep the escaped character
-                            result.push(next_char);
+                            current_token.push(next_char);
                             i += 2;
                         }
                         _ => {
-                            // Keep the backslash for other characters
-                            result.push(ch);
+                            current_token.push(ch);
                             i += 1;
                         }
                     }
                 } else {
-                    result.push(ch);
+                    current_token.push(ch);
                     i += 1;
                 }
             }
             ' ' => {
-                if i > 0 && chars[i - 1] != ' ' {
-                    result.push(ch);
+                // Space outside quotes - end current token
+                if !current_token.is_empty() {
+                    result.push(current_token.clone());
+                    current_token.clear();
+                }
+                // Skip multiple consecutive spaces
+                while i + 1 < chars.len() && chars[i + 1] == ' ' {
+                    i += 1;
                 }
                 i += 1;
             }
             _ => {
-                result.push(ch);
+                current_token.push(ch);
                 i += 1;
             }
         }
+    }
+
+    // Add the last token if it exists
+    if !current_token.is_empty() {
+        result.push(current_token);
     }
 
     result
@@ -188,7 +198,7 @@ fn find_closing_quote(chars: &[char], start: usize, quote_char: char) -> Option<
         i += 1;
     }
 
-    None // No closing quote found
+    None
 }
 
 #[derive(Debug, Clone, Default)]
@@ -200,7 +210,7 @@ pub struct FileInfo {
     pub user: String,
     pub group: String,
     pub permission_bits: usize,
-    pub device_info: (usize, usize),
+    pub device_info: (u64, u64),
     pub symlink_target: Option<String>,
     pub links: u64,
     pub size: u64,
@@ -321,23 +331,24 @@ fn join_path(absolute_path: &str, subfolder: &str) -> String {
 }
 
 fn get_classify_type(path: &str) -> CrateResult<String> {
+    use std::os::unix::fs::FileTypeExt;
     let metadata = std::fs::symlink_metadata(path)?;
+    let file_type = metadata.file_type();
 
     if metadata.is_dir() {
         Ok("directory".to_string())
-    } else if metadata.file_type().is_symlink() {
+    } else if file_type.is_symlink() {
         Ok("symlink".to_string())
-    } else if metadata.is_file() {
-        {
-            use std::os::unix::fs::PermissionsExt;
-            if (metadata.permissions().mode() & 0o111) != 0 {
-                Ok("executable".to_string())
-            } else {
-                Ok("file".to_string())
-            }
-        }
+    } else if file_type.is_char_device() {
+        Ok("char device".to_string())
+    } else if file_type.is_block_device() {
+        Ok("block device".to_string())
+    } else if file_type.is_fifo() {
+        Ok("pipe".to_string())
+    } else if file_type.is_socket() {
+        Ok("socket".to_string())
     } else {
-        Ok("other".to_string())
+        Ok("file".to_string())
     }
 }
 
@@ -349,7 +360,7 @@ pub fn display_ls_result(
 ) -> String {
     let mut result: String = String::new();
 
-    for dir in data.iter() {
+    for (idx, dir) in data.iter().enumerate() {
         let mut file_content = dir.file_content.clone();
         file_content.sort_by(|a, b| {
             // Special handling for . and .. entries
@@ -359,15 +370,8 @@ pub fn display_ls_result(
                 ("..", _) if b.name != "." => std::cmp::Ordering::Less,
                 (_, "..") if a.name != "." => std::cmp::Ordering::Greater,
                 _ => {
-                    // For all other entries, sort by type then alphabetically
-                    let type_cmp = a.r#type.cmp(&b.r#type);
-                    if type_cmp != std::cmp::Ordering::Equal {
-                        // Reverse so directories come first
-                        type_cmp.reverse()
-                    } else {
-                        // Then sort alphabetically (case-insensitive)
-                        a.name.to_lowercase().cmp(&b.name.to_lowercase())
-                    }
+                    // Then sort alphabetically (case-insensitive)
+                    a.name.to_lowercase().cmp(&b.name.to_lowercase())
                 }
             }
         });
@@ -383,17 +387,30 @@ pub fn display_ls_result(
             let mut max_user = 0usize;
             let mut max_group = 0usize;
             let mut max_size = 0usize;
+            let mut max_device_width = 0usize;
+
             for f in &file_content {
                 max_links = max_links.max(f.links.to_string().len());
                 max_user = max_user.max(f.user.len());
                 max_group = max_group.max(f.group.len());
-                max_size = max_size.max(f.size.to_string().len());
+
+                // Calculate device width for block/char devices
+                if f.r#type == "block_device" || f.r#type == "char_device" {
+                    let (_, dev_id) = f.device_info;
+                    let (major, minor) = extract_major_minor(dev_id);
+                    let device_str = format!("{}, {}", major, minor);
+                    max_device_width = max_device_width.max(device_str.len());
+                } else {
+                    max_size = max_size.max(f.size.to_string().len());
+                }
             }
+
+            // Ensure minimum width alignment with regular file sizes
+            max_device_width = max_device_width.max(max_size);
 
             let total_kblocks: u64 = {
                 #[cfg(unix)]
                 {
-                    use std::os::unix::fs::MetadataExt;
                     let mut blocks_512: u64 = 0;
                     for f in &file_content {
                         if let Ok(md) = std::fs::symlink_metadata(&f.full_path) {
@@ -419,23 +436,50 @@ pub fn display_ls_result(
                     }
                 }
 
-                result.push_str(
-                    &format!(
-                        "{}{} {:>links$} {:<userw$} {:<groupw$} {:>sizew$} {} {}\n",
-                        type_char,
-                        perms,
-                        file.links,
-                        file.user,
-                        file.group,
-                        file.size,
-                        file.modified_time,
-                        name_segment,
-                        links = max_links,
-                        userw = max_user,
-                        groupw = max_group,
-                        sizew = max_size
-                    )
-                );
+                match type_char {
+                    v if v == 'b' || v == 'c' => {
+                        let (_, dev_id) = file.device_info;
+                        let (major, minor) = extract_major_minor(dev_id);
+                        let device_str = format!("{}, {}", major, minor);
+
+                        result.push_str(
+                            &format!(
+                                "{}{} {:>links$} {:<userw$} {:<groupw$} {:>devicew$} {} {}\n",
+                                type_char,
+                                perms,
+                                file.links,
+                                file.user,
+                                file.group,
+                                device_str,
+                                file.modified_time,
+                                name_segment,
+                                links = max_links,
+                                userw = max_user,
+                                groupw = max_group,
+                                devicew = max_device_width
+                            )
+                        );
+                    }
+                    _ => {
+                        result.push_str(
+                            &format!(
+                                "{}{} {:>links$} {:<userw$} {:<groupw$} {:>sizew$} {} {}\n",
+                                type_char,
+                                perms,
+                                file.links,
+                                file.user,
+                                file.group,
+                                file.size,
+                                file.modified_time,
+                                name_segment,
+                                links = max_links,
+                                userw = max_user,
+                                groupw = max_group,
+                                sizew = max_size
+                            )
+                        );
+                    }
+                }
             }
         } else {
             for (idx, file) in file_content.iter().enumerate() {
@@ -451,6 +495,10 @@ pub fn display_ls_result(
                 }
             }
         }
+        
+        if idx<data.len()-1 {
+            result.push('\n');
+        }
     }
 
     result
@@ -458,12 +506,16 @@ pub fn display_ls_result(
 
 fn add_classify_syntax<'a>(file_type: &'a str) -> &'a str {
     match file_type {
-        "file" => "",
         "directory" => "/",
         "executable" => "*",
-        "symlink" => "->",
+        "socket" => "=",
+        "pipe" => "|",
         _ => "",
     }
+}
+
+fn extract_major_minor(dev_id: u64) -> (usize, usize) {
+    (({ libc::major(dev_id) }) as usize, ({ libc::minor(dev_id) }) as usize)
 }
 
 fn populate_listing_info(info: &mut FileInfo) {
@@ -472,7 +524,7 @@ fn populate_listing_info(info: &mut FileInfo) {
     let mut permission_bits: usize = 0;
     let mut user_string = String::new();
     let mut group_string = String::new();
-    let mut device_info: (usize, usize) = (0, 0);
+    let mut device_info: (u64, u64) = (0, 0);
     let mut symlink_target: Option<String> = None;
     let mut links: u64 = 0;
     let mut size: u64 = 0;
@@ -489,8 +541,6 @@ fn populate_listing_info(info: &mut FileInfo) {
         }
 
         {
-            use std::os::unix::fs::MetadataExt;
-
             let mode = md.mode();
             permission_bits = (mode & 0o777) as usize;
             permissions_string = build_unix_permission_string(mode);
@@ -498,7 +548,7 @@ fn populate_listing_info(info: &mut FileInfo) {
             user_string = resolve_unix_user(md.uid());
             group_string = resolve_unix_group(md.gid());
 
-            device_info = (md.dev() as usize, md.rdev() as usize);
+            device_info = (md.dev(), md.rdev());
             links = md.nlink() as u64;
             size = md.size();
 
@@ -509,15 +559,7 @@ fn populate_listing_info(info: &mut FileInfo) {
     }
 
     info.permission_bits = permission_bits;
-    
-    // Add extended attributes indicator if present
-    #[cfg(unix)]
-    {
-        if has_extended_attributes(&info.full_path) {
-            permissions_string.push('+');
-        }
-    }
-    
+
     info.permissions = if permissions_string.is_empty() {
         Vec::new()
     } else {
@@ -541,50 +583,43 @@ fn build_unix_permission_string(mode: u32) -> String {
     let others = mode & 0o007;
 
     // Owner permissions
-    perm_str.push(if owner & 0o4 != 0 { 'r' } else { '-' });
-    perm_str.push(if owner & 0o2 != 0 { 'w' } else { '-' });
-    if mode & 0o4000 != 0 {
-        perm_str.push(if owner & 0o1 != 0 { 's' } else { 'S' });
+    perm_str.push(if (owner & 0o4) != 0 { 'r' } else { '-' });
+    perm_str.push(if (owner & 0o2) != 0 { 'w' } else { '-' });
+    if (mode & 0o4000) != 0 {
+        perm_str.push(if (owner & 0o1) != 0 { 's' } else { 'S' });
     } else {
-        perm_str.push(if owner & 0o1 != 0 { 'x' } else { '-' });
+        perm_str.push(if (owner & 0o1) != 0 { 'x' } else { '-' });
     }
 
     // Group permissions
-    perm_str.push(if group & 0o4 != 0 { 'r' } else { '-' });
-    perm_str.push(if group & 0o2 != 0 { 'w' } else { '-' });
-    if mode & 0o2000 != 0 {
-        perm_str.push(if group & 0o1 != 0 { 's' } else { 'S' });
+    perm_str.push(if (group & 0o4) != 0 { 'r' } else { '-' });
+    perm_str.push(if (group & 0o2) != 0 { 'w' } else { '-' });
+    if (mode & 0o2000) != 0 {
+        perm_str.push(if (group & 0o1) != 0 { 's' } else { 'S' });
     } else {
-        perm_str.push(if group & 0o1 != 0 { 'x' } else { '-' });
+        perm_str.push(if (group & 0o1) != 0 { 'x' } else { '-' });
     }
 
     // Others permissions
-    perm_str.push(if others & 0o4 != 0 { 'r' } else { '-' });
-    perm_str.push(if others & 0o2 != 0 { 'w' } else { '-' });
-    if mode & 0o1000 != 0 {
-        perm_str.push(if others & 0o1 != 0 { 't' } else { 'T' });
+    perm_str.push(if (others & 0o4) != 0 { 'r' } else { '-' });
+    perm_str.push(if (others & 0o2) != 0 { 'w' } else { '-' });
+    if (mode & 0o1000) != 0 {
+        perm_str.push(if (others & 0o1) != 0 { 't' } else { 'T' });
     } else {
-        perm_str.push(if others & 0o1 != 0 { 'x' } else { '-' });
+        perm_str.push(if (others & 0o1) != 0 { 'x' } else { '-' });
     }
 
     perm_str
-}
-
-#[cfg(unix)]
-fn has_extended_attributes(path: &str) -> bool {
-    unsafe {
-        libc::listxattr(
-            path.as_ptr() as *const _,
-            std::ptr::null_mut(),
-            0,
-        ) > 0
-    }
 }
 
 fn file_type_char(file_type: &str) -> char {
     match file_type {
         "directory" => 'd',
         "symlink" => 'l',
+        "char device" => 'c',
+        "block device" => 'b',
+        "socket" => 's',
+        "pipe" => 'p',
         _ => '-',
     }
 }
@@ -624,15 +659,15 @@ fn resolve_unix_group(gid: u32) -> String {
 
 #[cfg(unix)]
 fn format_time_unix(time: std::time::SystemTime) -> String {
-    use chrono::{DateTime, Local};
+    use chrono::{ DateTime, Local };
     use chrono_tz::Tz;
-    
-        let name = iana_time_zone::get_timezone().unwrap_or("UTC".to_string());
+
+    let name = iana_time_zone::get_timezone().unwrap_or("UTC".to_string());
     let tz = name.parse::<chrono_tz::Tz>().unwrap_or(Tz::UTC);
     let last_mod_time = time;
     let datetime: DateTime<Local> = last_mod_time.into();
     let datetime = datetime.with_timezone(&tz);
-    
+
     let mut formatted_time = datetime.format("%b %e %H:%M").to_string();
     let current_year = Local::now().year();
     let its_year = datetime.year();

@@ -29,10 +29,6 @@ pub struct Rm {
 }
 
 impl Ls {
-    // fn from(is_all: bool, is_classify: bool, is_listing: bool, dirs: Vec<String>) -> Self {
-    //     Self { is_all, is_classify, is_listing, dirs }
-    // }
-
     fn new() -> Self {
         Self {
             is_all: false,
@@ -49,28 +45,27 @@ impl Rm {
     }
 }
 
-impl TryFrom<&str> for Command {
+impl TryFrom<Vec<String>> for Command {
     type Error = anyhow::Error;
 
-    fn try_from(input: &str) -> Result<Self, Self::Error> {
-        let input_slice: Vec<&str> = input.split(" ").collect();
-        match input_slice[0].to_lowercase().as_str() {
+    fn try_from(input: Vec<String>) -> Result<Self, Self::Error> {
+        match input[0].to_lowercase().as_str() {
             "exit" => Ok(Self::Exit),
 
             "pwd" => {
                 return Ok(Self::Pwd);
             }
 
-            "cd" => if input_slice.len() > 2 {
-                return Err(anyhow!("cd requires one arguments"));
+            "cd" => if input.len() > 2 {
+                return Err(anyhow!("cd requires just one argument"));
             } else {
-                return Ok(Self::Cd(input_slice[1..].join(" ")));
+                return Ok(Self::Cd(input[1].to_string()));
             }
 
             "ls" => {
                 let mut result = Ls::new();
-                if input_slice.len() > 1 {
-                    for v in &input_slice[1..] {
+                if input.len() > 1 {
+                    for v in &input[1..] {
                         if v.starts_with("-") {
                             for ch in v.chars().skip(1) {
                                 match ch {
@@ -99,18 +94,18 @@ impl TryFrom<&str> for Command {
                 return Ok(Self::Ls(result));
             }
 
-            "echo" => if input_slice.len() < 2 {
+            "echo" => if input.len() < 2 {
                 return Err(anyhow!("echo requires an argument"));
             } else {
-                return Ok(Self::Echo(input_slice[1..].join(" ")));
+                return Ok(Self::Echo(input[1..].join(" ")));
             }
 
-            "cat" => if input_slice.len() < 2 {
+            "cat" => if input.len() < 2 {
                 return Err(anyhow!("cat requires an argument"));
             } else {
                 return Ok(
                     Self::Cat(
-                        input_slice[1..]
+                        input[1..]
                             .iter()
                             .map(|s| s.to_string())
                             .collect()
@@ -118,12 +113,12 @@ impl TryFrom<&str> for Command {
                 );
             }
 
-            "cp" => if input_slice.len() != 3 {
+            "cp" => if input.len() != 3 {
                 return Err(anyhow!("cp requires two arguments: source & target"));
             } else {
                 return Ok(
                     Self::Cp(
-                        input_slice[1..]
+                        input[1..]
                             .iter()
                             .map(|s| s.to_string())
                             .collect()
@@ -131,16 +126,16 @@ impl TryFrom<&str> for Command {
                 );
             }
 
-            "rm" => if input_slice.len() < 2 {
+            "rm" => if input.len() < 2 {
                 return Err(anyhow!("rm requires at least one argument"));
             } else {
-                match input_slice[1] {
-                    "-r" => if input_slice.len() > 2 {
+                match input[1].as_str() {
+                    "-r" => if input.len() > 2 {
                         return Ok(
                             Self::Rm(
                                 Rm::from(
                                     true,
-                                    input_slice[2..]
+                                    input[2..]
                                         .iter()
                                         .map(|s| s.to_string())
                                         .collect()
@@ -158,7 +153,7 @@ impl TryFrom<&str> for Command {
                             Self::Rm(
                                 Rm::from(
                                     false,
-                                    input_slice[1..]
+                                    input[1..]
                                         .iter()
                                         .map(|s| s.to_string())
                                         .collect()
@@ -169,14 +164,14 @@ impl TryFrom<&str> for Command {
                 }
             }
 
-            "mv" => if input_slice.len() < 3 {
+            "mv" => if input.len() < 3 {
                 return Err(
                     anyhow!("mv requires at least two arguments: ccxsource(s) and destination")
                 );
             } else {
                 return Ok(
                     Self::Mv(
-                        input_slice[1..]
+                        input[1..]
                             .iter()
                             .map(|s| s.to_string())
                             .collect()
@@ -184,12 +179,12 @@ impl TryFrom<&str> for Command {
                 );
             }
 
-            "mkdir" => if input_slice.len() < 2 {
+            "mkdir" => if input.len() < 2 {
                 return Err(anyhow!("mkdir requires at least one argument"));
             } else {
                 return Ok(
                     Self::Mkdir(
-                        input_slice[1..]
+                        input[1..]
                             .iter()
                             .map(|s| s.to_string())
                             .collect()
